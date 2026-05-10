@@ -319,6 +319,37 @@ function App() {
     await runTerminalCommand(terminalInput);
   }, [runTerminalCommand, terminalInput]);
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase();
+      const mod = event.ctrlKey || event.metaKey;
+
+      if (mod && key === "b") {
+        event.preventDefault();
+        setShowExplorer((value) => !value);
+      } else if (mod && event.shiftKey && key === "a") {
+        event.preventDefault();
+        setShowChat((value) => !value);
+      } else if (mod && event.key === "`") {
+        event.preventDefault();
+        setShowTerminal((value) => !value);
+        requestAnimationFrame(() => terminalInputRef.current?.focus());
+      } else if (mod && event.shiftKey && key === "n") {
+        event.preventDefault();
+        createFile();
+      } else if (mod && event.altKey && key === "n") {
+        event.preventDefault();
+        createFolder();
+      } else if (mod && key === "s") {
+        event.preventDefault();
+        saveFile();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [createFile, createFolder, saveFile]);
+
   const renderFileTree = useCallback((fileList, depth = 0) => {
     return fileList.map((file, index) => {
       const fullPath = path.join(currentPath, file.path);
@@ -385,6 +416,9 @@ function App() {
           <button onClick={() => setTerminalOutput([])}>
             <VscTerminal className="header-icon" /> Clear Terminal
           </button>
+          <button onClick={() => setShowExplorer((value) => !value)} title="Toggle Explorer (Ctrl+B)">Explorer</button>
+          <button onClick={() => setShowTerminal((value) => !value)} title="Toggle Terminal (Ctrl+`)">Terminal</button>
+          <button onClick={() => setShowChat((value) => !value)} title="Toggle Chat (Ctrl+Shift+A)">Chat</button>
         </div>
       </header>
 
@@ -397,9 +431,18 @@ function App() {
         </nav>
 
         <PanelGroup direction="horizontal" className="panel-workspace">
+          {showExplorer && (
+            <>
           <Panel defaultSize={18} minSize={12} maxSize={34} className="explorer-panel">
             <div className="panel-header">
               <h2>{panelTitle}</h2>
+              {activeActivity === "explorer" && (
+                <div className="panel-actions">
+                  <button onClick={createFile} title="New File (Ctrl+Shift+N)"><VscNewFile /></button>
+                  <button onClick={createFolder} title="New Folder (Ctrl+Alt+N)"><VscNewFolder /></button>
+                  <button onClick={() => loadFiles(selectedRepo?.path || currentPath)} disabled={!selectedRepo?.path && !currentPath} title="Refresh Explorer"><VscSync /></button>
+                </div>
+              )}
             </div>
             {activeActivity === "settings" ? (
               <div className="settings-panel">
@@ -435,6 +478,8 @@ function App() {
           </Panel>
 
           <PanelResizeHandle className="resize-handle" />
+            </>
+          )}
 
           <Panel minSize={36} defaultSize={58} className="center-panel">
             <PanelGroup direction="vertical">
