@@ -42,12 +42,18 @@ file contents here
 \`\`\`anai-run
 terminal command here
 \`\`\`
+\`\`\`anai-read path=relative/path.ext
+\`\`\`
+\`\`\`anai-mkdir path=relative/folder
+\`\`\`
 
 Only write files or run commands when the user asks you to. Use relative paths inside the selected workspace.`;
 
 const extractActions = (text) => {
   const actions = [];
   const writeRegex = /```anai-(?:write|create|edit)\s+path=([^\n]+)\n([\s\S]*?)```/gi;
+  const folderRegex = /```anai-mkdir\s+path=([^\n]+)\s*```/gi;
+  const readRegex = /```anai-read\s+path=([^\n]+)\s*```/gi;
   const runRegex = /```anai-run\s*\n([\s\S]*?)```/gi;
   let match;
 
@@ -66,12 +72,28 @@ const extractActions = (text) => {
     });
   }
 
+  while ((match = readRegex.exec(text)) !== null) {
+    actions.push({
+      type: "readFile",
+      path: match[1].trim()
+    });
+  }
+
+  while ((match = folderRegex.exec(text)) !== null) {
+    actions.push({
+      type: "createFolder",
+      path: match[1].trim()
+    });
+  }
+
   return actions;
 };
 
 const stripActionBlocks = (text) => {
   return text
     .replace(/```anai-(?:write|create|edit)\s+path=[^\n]+\n[\s\S]*?```/gi, "")
+    .replace(/```anai-mkdir\s+path=[^\n]+\s*```/gi, "")
+    .replace(/```anai-read\s+path=[^\n]+\s*```/gi, "")
     .replace(/```anai-run\s*\n[\s\S]*?```/gi, "")
     .trim();
 };
@@ -91,6 +113,21 @@ const cleanAssistantText = (text) => {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/gi, "")
     .trim();
+};
+
+const hasOpenThinking = (text) => {
+  const openCount = (text.match(/<think>/gi) || []).length;
+  const closeCount = (text.match(/<\/think>/gi) || []).length;
+  return openCount > closeCount;
+};
+
+const flattenTree = (items = [], depth = 0, limit = 80, lines = []) => {
+  for (const item of items) {
+    if (lines.length >= limit) break;
+    lines.push(`${"  ".repeat(depth)}${item.type === "folder" ? "/" : ""}${item.path || item.name}`);
+    if (item.children) flattenTree(item.children, depth + 1, limit, lines);
+  }
+  return lines;
 };
 
 const renderMessageContent = (content) => {
@@ -238,10 +275,25 @@ function AiChat({
           return `File action failed: ${result.error}`;
         }
 
+        if (result.type === "createFolder") {
+          if (result.ok) {
+            onWorkspaceRefresh?.();
+            return `Created folder ${result.path}`;
+          }
+          return `Folder action failed: ${result.error}`;
+        }
+
         if (result.type === "runCommand") {
           const output = [result.stdout, result.stderr, result.error].filter(Boolean).join("\n");
           onTerminalOutput?.(`$ ${result.command}\n${output || "Command executed"}`);
           return result.ok ? `Ran: ${result.command}` : `Command failed: ${result.command}`;
+        }
+
+        if (result.type === "readFile") {
+          if (result.ok) {
+            return `Read ${result.path}:\n\`\`\`\n${result.content.slice(0, 4000)}\n\`\`\``;
+          }
+          return `Read failed: ${result.error}`;
         }
 
         return result.ok ? `${result.type} complete` : `${result.type} failed`;
@@ -305,6 +357,16 @@ function AiChat({
     }, 1400);
 
     try {
+      let workspaceSummary = "No workspace folder is open.";
+      if (workspacePath) {
+        try {
+          const treeRes = await axios.get(`http://localhost:3001/files?path=${encodeURIComponent(workspacePath)}`);
+          workspaceSummary = flattenTree(treeRes.data.tree).join("\n") || "Workspace is empty.";
+        } catch {
+          workspaceSummary = "Workspace tree could not be loaded.";
+        }
+      }
+
       const historyContext = visibleMessages.slice(-8).map((msg) => `${msg.role}: ${msg.content}`).join("\n");
       const response = await fetch("http://localhost:11434/api/generate", {
         method: "POST",
@@ -312,11 +374,12 @@ function AiChat({
         signal: controller.signal,
         body: JSON.stringify({
           model: modelToUse,
-          prompt: `${buildSystemPrompt(workspacePath)}\n\nConversation:\n${historyContext}\n\nUser: ${promptText}${modelNotice}\nAssistant:`,
+          prompt: `${buildSystemPrompt(workspacePath)}\n\nWorkspace file tree:\n${workspaceSummary}\n\nConversation:\n${historyContext}\n\nUser: ${promptText}${modelNotice}\nAssistant:`,
           stream: true,
-          temperature: modePreference === "fast" ? 0.15 : 0.35,
-          max_tokens: modePreference === "fast" ? 512 : 1024,
-          num_ctx: 4096
+          temperature: modePreference === "fast" ? 0.05 : 0.25,
+          max_tokens: modePreference === "fast" ? 384 : 768,
+          num_ctx: 3072,
+          keep_alive: "10m"
         })
       });
 
@@ -344,7 +407,9 @@ function AiChat({
               const currentText = finalText;
               const thinking = extractThinking(currentText);
               setThinkingText(thinking ? thinking.slice(0, 140) : "");
-              patchLastAssistant((msg) => ({ ...msg, content: cleanAssistantText(currentText), model: modelToUse }));
+              if (!hasOpenThinking(currentText)) {
+                patchLastAssistant((msg) => ({ ...msg, content: cleanAssistantText(currentText), model: modelToUse }));
+              }
             }
           } catch {
             // Wait for the next stream chunk if Ollama splits a JSON line.

@@ -464,6 +464,12 @@ app.post("/ai/actions", async (req, res) => {
           fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(targetPath, action.content || "", "utf-8");
+        directoryCache.clear();
+        results.push({ type: action.type, ok: true, path: targetPath });
+      } else if (action.type === "createFolder") {
+        const targetPath = resolvePathInsideWorkspace(workspacePath, action.path);
+        fs.mkdirSync(targetPath, { recursive: true });
+        directoryCache.clear();
         results.push({ type: action.type, ok: true, path: targetPath });
       } else if (action.type === "readFile") {
         const targetPath = resolvePathInsideWorkspace(workspacePath, action.path);

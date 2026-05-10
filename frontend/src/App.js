@@ -424,10 +424,10 @@ function App() {
 
       <div className="workspace-shell">
         <nav className="activity-bar">
-          <button className={`activity-item ${activeActivity === "explorer" ? "active" : ""}`} onClick={() => setActiveActivity("explorer")} title="Explorer"><VscFolderOpened /></button>
-          <button className={`activity-item ${activeActivity === "search" ? "active" : ""}`} onClick={() => setActiveActivity("search")} title="Search"><VscSearch /></button>
-          <button className={`activity-item ${activeActivity === "extensions" ? "active" : ""}`} onClick={() => setActiveActivity("extensions")} title="Extensions"><VscExtensions /></button>
-          <button className={`activity-item ${activeActivity === "settings" ? "active" : ""}`} onClick={() => setActiveActivity("settings")} title="Repo & Settings"><VscSettings /></button>
+          <button className={`activity-item ${activeActivity === "explorer" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("explorer"); setShowExplorer(true); }} title="Explorer"><VscFolderOpened /></button>
+          <button className={`activity-item ${activeActivity === "search" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("search"); setShowExplorer(true); }} title="Search"><VscSearch /></button>
+          <button className={`activity-item ${activeActivity === "extensions" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("extensions"); setShowExplorer(true); }} title="Extensions"><VscExtensions /></button>
+          <button className={`activity-item ${activeActivity === "settings" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("settings"); setShowExplorer(true); }} title="Repo & Settings"><VscSettings /></button>
         </nav>
 
         <PanelGroup direction="horizontal" className="panel-workspace">
@@ -486,9 +486,13 @@ function App() {
               <Panel defaultSize={68} minSize={35} className="editor-panel">
                 <div className="editor-toolbar">
                   <div className="editor-path">{activeFile || "No file open"}</div>
-                  <button className="save-button" onClick={saveFile} disabled={!activeFile} title="Save file">
-                    <VscSave /> Save
-                  </button>
+                  <div className="editor-actions">
+                    <button className="save-button" onClick={() => editorRef.current?.undo()} disabled={!activeFile} title="Undo (Ctrl+Z)">Undo</button>
+                    <button className="save-button" onClick={() => editorRef.current?.redo()} disabled={!activeFile} title="Redo (Ctrl+Y)">Redo</button>
+                    <button className="save-button" onClick={saveFile} disabled={!activeFile} title="Save file (Ctrl+S)">
+                      <VscSave /> Save
+                    </button>
+                  </div>
                 </div>
 
                 <div className="file-tabs">
@@ -505,7 +509,7 @@ function App() {
                 <div className="code-editor-area">
                   {activeFile ? (
                     <Suspense fallback={<div className="editor-loading">Loading editor...</div>}>
-                      <CodeEditor value={fileContent} onChange={setFileContent} language={getLanguageFromFileName(activeFile)} theme="vs-dark" />
+                      <CodeEditor ref={editorRef} value={fileContent} onChange={setFileContent} language={getLanguageFromFileName(activeFile)} theme="vs-dark" />
                     </Suspense>
                   ) : (
                     <div className="no-file-open">
@@ -515,6 +519,8 @@ function App() {
                 </div>
               </Panel>
 
+              {showTerminal && (
+                <>
               <PanelResizeHandle className="resize-handle horizontal" />
 
               <Panel defaultSize={32} minSize={18} maxSize={60} className="terminal-panel">
@@ -538,12 +544,16 @@ function App() {
                   </div>
                 </div>
               </Panel>
+                </>
+              )}
             </PanelGroup>
           </Panel>
 
+          {showChat && (
+            <>
           <PanelResizeHandle className="resize-handle" />
 
-          <Panel defaultSize={24} minSize={16} maxSize={38} className="ai-panel">
+          <Panel defaultSize={30} minSize={22} maxSize={48} className="ai-panel">
             <div className="panel-header">
               <h2>AI Chat</h2>
             </div>
@@ -556,6 +566,8 @@ function App() {
               onRunTerminalCommand={(command) => runTerminalCommand(command)}
             />
           </Panel>
+            </>
+          )}
         </PanelGroup>
       </div>
 
@@ -566,6 +578,9 @@ function App() {
           <span>{selectedRepo ? `Repo: ${selectedRepo.name}` : "Workspace"}</span>
         </div>
         <div className="status-right">
+          <span>Ctrl+B Explorer</span>
+          <span>Ctrl+` Terminal</span>
+          <span>Ctrl+Shift+A Chat</span>
           <span>{terminalProfiles.find((profile) => profile.id === activeTerminalProfile)?.name || "Terminal"}</span>
           <span>Backend: 3001</span>
         </div>
