@@ -6,6 +6,7 @@ import "./App.css";
 function App() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
+  const [activeActivity, setActiveActivity] = useState("explorer");
   const [terminalOutput, setTerminalOutput] = useState([]);
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalHistory, setTerminalHistory] = useState([]);
@@ -17,6 +18,8 @@ function App() {
   const [fileContent, setFileContent] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(250);
   const [terminalHeight, setTerminalHeight] = useState(200);
+  const [activeTerminalTab, setActiveTerminalTab] = useState("terminal");
+  const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
   const terminalRef = useRef(null);
 
   // Auto-scroll terminal to bottom
@@ -213,7 +216,7 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className="ide-container">
       {/* Header */}
       <div className="header">
         <h1>ANAI - AI Agent IDE</h1>
@@ -223,6 +226,39 @@ function App() {
         </div>
       </div>
 
+      {/* Activity Bar */}
+      <div className="activity-bar">
+        <div 
+          className={`activity-item ${activeActivity === 'explorer' ? 'active' : ''}`}
+          onClick={() => setActiveActivity('explorer')}
+          title="Explorer"
+        >
+          📁
+        </div>
+        <div 
+          className={`activity-item ${activeActivity === 'search' ? 'active' : ''}`}
+          onClick={() => setActiveActivity('search')}
+          title="Search"
+        >
+          🔍
+        </div>
+        <div 
+          className={`activity-item ${activeActivity === 'extensions' ? 'active' : ''}`}
+          onClick={() => setActiveActivity('extensions')}
+          title="Extensions"
+        >
+          🧩
+        </div>
+        <div 
+          className={`activity-item ${activeActivity === 'settings' ? 'active' : ''}`}
+          onClick={() => setActiveActivity('settings')}
+          title="Settings"
+        >
+          ⚙️
+        </div>
+      </div>
+
+      {/* Main Content Grid */}
       <div className="main-content">
         {/* Sidebar */}
         <div className="sidebar" style={{ width: sidebarWidth }}>
@@ -265,6 +301,25 @@ function App() {
                 ))}
               </div>
             )}
+
+            {/* Breadcrumbs */}
+            {activeFile && (
+              <div className="breadcrumbs">
+                <span className="breadcrumb-item">ANAI</span>
+                <span className="breadcrumb-separator">›</span>
+                <span className="breadcrumb-item">
+                  {activeFile.includes('\\') ? activeFile.split('\\')[0] : activeFile.split('/')[0]}
+                </span>
+                {activeFile.split('\\').length > 1 || activeFile.split('/').length > 1 ? (
+                  <>
+                    <span className="breadcrumb-separator">›</span>
+                    <span className="breadcrumb-item">
+                      {activeFile.includes('\\') ? activeFile.split('\\').slice(1).join('\\') : activeFile.split('/').slice(1).join('/')}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+            )}
             
             {/* Code Editor */}
             {activeFile ? (
@@ -273,12 +328,20 @@ function App() {
                   <span>{activeFile}</span>
                   <button onClick={saveFile} className="save-button">Save</button>
                 </div>
-                <textarea
-                  value={fileContent}
-                  onChange={(e) => setFileContent(e.target.value)}
-                  className="editor-textarea"
-                  placeholder="File content..."
-                />
+                <div className="editor-container">
+                  <div className="line-numbers">
+                    {fileContent.split('\n').map((_, i) => (
+                      <div key={i} className="line-number">{i + 1}</div>
+                    ))}
+                  </div>
+                  <textarea
+                    value={fileContent}
+                    onChange={(e) => setFileContent(e.target.value)}
+                    className="editor-textarea"
+                    placeholder="File content..."
+                    spellCheck={false}
+                  />
+                </div>
               </div>
             ) : (
               <div className="no-file-open">
@@ -331,6 +394,94 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* AI Assistant Sidebar */}
+        <div className={`ai-sidebar ${aiSidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="ai-sidebar-header">
+            <span>ANAI Assistant</span>
+            <button 
+              className="collapse-btn"
+              onClick={() => setAiSidebarCollapsed(!aiSidebarCollapsed)}
+            >
+              {aiSidebarCollapsed ? '◀' : '▶'}
+            </button>
+          </div>
+          {!aiSidebarCollapsed && (
+            <div className="ai-chat-container">
+              <div className="messages">
+                {messages.map((msg, i) => renderMessage(msg, i))}
+              </div>
+              
+              <div className="input-area">
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  placeholder="Ask ANAI anything..."
+                  className="chat-input"
+                />
+                <button onClick={sendMessage} className="send-button">Send</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Panel - Terminal */}
+      <div className="bottom-panel">
+        <div className="terminal-tabs">
+          <div 
+            className={`terminal-tab ${activeTerminalTab === 'terminal' ? 'active' : ''}`}
+            onClick={() => setActiveTerminalTab('terminal')}
+          >
+            Terminal
+          </div>
+          <div 
+            className={`terminal-tab ${activeTerminalTab === 'output' ? 'active' : ''}`}
+            onClick={() => setActiveTerminalTab('output')}
+          >
+            Output
+          </div>
+          <div 
+            className={`terminal-tab ${activeTerminalTab === 'debug' ? 'active' : ''}`}
+            onClick={() => setActiveTerminalTab('debug')}
+          >
+            Debug Console
+          </div>
+        </div>
+        
+        {activeTerminalTab === 'terminal' && (
+          <div className="terminal" style={{ height: terminalHeight }}>
+            <div className="terminal-body" ref={terminalRef}>
+              {terminalOutput.map((output, i) => (
+                <div key={i} className="terminal-line">{output}</div>
+              ))}
+              <input
+                value={terminalInput}
+                onChange={(e) => setTerminalInput(e.target.value)}
+                onKeyPress={executeTerminalCommand}
+                placeholder="Type command..."
+                className="terminal-input"
+              />
+            </div>
+          </div>
+        )}
+        
+        {activeTerminalTab === 'output' && (
+          <div className="output-panel">
+            <div className="output-content">
+              <p>Build output and logs will appear here...</p>
+            </div>
+          </div>
+        )}
+        
+        {activeTerminalTab === 'debug' && (
+          <div className="debug-panel">
+            <div className="debug-content">
+              <p>Debug console output will appear here...</p>
+            </div>
+          </div>
+        )}
       </div>
       
       {/* Status Bar */}
@@ -344,6 +495,9 @@ function App() {
           <span className="status-item">
             {openFiles.length > 0 ? `${openFiles.length} file${openFiles.length > 1 ? 's' : ''} open` : 'No files open'}
           </span>
+          <span className="status-item">main</span>
+          <span className="status-item">UTF-8</span>
+          <span className="status-item">JavaScript</span>
         </div>
         <div className="status-right">
           <span className="status-item">ANAI v1.0</span>
