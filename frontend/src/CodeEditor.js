@@ -3,7 +3,7 @@ import Editor from "@monaco-editor/react";
 
 const CodeEditor = ({ value, onChange, language = "javascript", theme = "vs-dark" }) => {
   return (
-    <div className="monaco-editor-container" style={{ height: "100%", border: "1px solid #333", borderRadius: "8px", overflow: "hidden" }}>
+    <div className="monaco-editor-container" style={{ height: "100%", overflow: "hidden" }}>
       <Editor
         height="100%"
         defaultLanguage={language}

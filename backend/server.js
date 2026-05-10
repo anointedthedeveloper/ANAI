@@ -2,7 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const fs = require("fs");
-const { exec } = require("child_process");
+const { exec, execFile } = require("child_process");
 const path = require("path");
 
 const app = express();
@@ -16,6 +16,64 @@ if (!fs.existsSync(REPO_BASE)) {
 }
 
 let history = [];
+
+const executableExists = (command) => {
+  const lookupCommand = process.platform === "win32" ? "where" : "command";
+  const lookupArgs = process.platform === "win32" ? [command] : ["-v", command];
+
+  return new Promise((resolve) => {
+    execFile(lookupCommand, lookupArgs, (error) => resolve(!error));
+  });
+};
+
+const getTerminalProfileCandidates = () => {
+  if (process.platform === "win32") {
+    return [
+      {
+        id: "powershell",
+        name: "Windows PowerShell",
+        command: "powershell.exe",
+        args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+      },
+      {
+        id: "pwsh",
+        name: "PowerShell",
+        command: "pwsh.exe",
+        args: ["-NoLogo", "-NoProfile", "-Command"]
+      },
+      {
+        id: "cmd",
+        name: "Command Prompt",
+        command: "cmd.exe",
+        args: ["/d", "/s", "/c"]
+      },
+      {
+        id: "git-bash",
+        name: "Git Bash",
+        command: "bash.exe",
+        args: ["-lc"]
+      }
+    ];
+  }
+
+  return [
+    { id: "bash", name: "Bash", command: "bash", args: ["-lc"] },
+    { id: "zsh", name: "Zsh", command: "zsh", args: ["-lc"] },
+    { id: "fish", name: "Fish", command: "fish", args: ["-lc"] },
+    { id: "sh", name: "Shell", command: "sh", args: ["-lc"] },
+    { id: "pwsh", name: "PowerShell", command: "pwsh", args: ["-NoLogo", "-NoProfile", "-Command"] }
+  ];
+};
+
+const getAvailableTerminalProfiles = async () => {
+  const candidates = getTerminalProfileCandidates();
+  const checks = await Promise.all(candidates.map(async (profile) => ({
+    ...profile,
+    available: await executableExists(profile.command)
+  })));
+  const available = checks.filter((profile) => profile.available);
+  return available.length ? available : [checks[0]];
+};
 
 const getRepoName = (repoUrl) => {
   try {
@@ -225,6 +283,60 @@ app.get("/models", async (req, res) => {
         { name: "neural-chat" }
       ]
     });
+  }
+});
+
+app.get("/terminal/profiles", async (req, res) => {
+  try {
+    const profiles = await getAvailableTerminalProfiles();
+    res.json({
+      profiles: profiles.map(({ id, name, command }) => ({ id, name, command }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/terminal/run", async (req, res) => {
+  const { command, profileId, cwd } = req.body;
+  if (!command || !command.trim()) {
+    return res.status(400).json({ error: "Command is required" });
+  }
+
+  try {
+    const profiles = await getAvailableTerminalProfiles();
+    const profile = profiles.find((item) => item.id === profileId) || profiles[0];
+    const workingDirectory = cwd && fs.existsSync(cwd) && fs.statSync(cwd).isDirectory()
+      ? cwd
+      : process.cwd();
+
+    execFile(
+      profile.command,
+      [...profile.args, command],
+      {
+        cwd: workingDirectory,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024 * 10,
+        timeout: 120000
+      },
+      (error, stdout, stderr) => {
+        res.json({
+          command,
+          profile: {
+            id: profile.id,
+            name: profile.name,
+            command: profile.command
+          },
+          cwd: workingDirectory,
+          stdout,
+          stderr,
+          exitCode: typeof error?.code === "number" ? error.code : 0,
+          error: error && !stdout && !stderr ? error.message : ""
+        });
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

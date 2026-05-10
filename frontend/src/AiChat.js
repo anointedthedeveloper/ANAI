@@ -28,26 +28,8 @@ function AiChat() {
 
   const modelSummary = useMemo(() => {
     if (!models.length) return modelStatus;
-    return `Connected: ${models.length} model${models.length > 1 ? "s" : ""} — ${modePreference === "quality" ? "Quality" : "Fast"} mode`;
+    return `Connected: ${models.length} model${models.length > 1 ? "s" : ""} - ${modePreference === "quality" ? "Quality" : "Fast"} mode`;
   }, [models.length, modePreference, modelStatus]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    fetchModels();
-  }, []);
-
-  useEffect(() => {
-    if (models.length > 0) {
-      const nextModel = modePreference === "quality"
-        ? pickBestModel(models, qualityModels)
-        : pickBestModel(models, fastModels);
-      setSelectedModel(nextModel);
-      setModelStatus(modelSummary);
-    }
-  }, [modePreference, models, modelSummary, pickBestModel]);
 
   const fetchModels = useCallback(async () => {
     try {
@@ -72,6 +54,24 @@ function AiChat() {
     }
   }, [modePreference, pickBestModel]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  useEffect(() => {
+    if (models.length > 0) {
+      const nextModel = modePreference === "quality"
+        ? pickBestModel(models, qualityModels)
+        : pickBestModel(models, fastModels);
+      setSelectedModel(nextModel);
+      setModelStatus(modelSummary);
+    }
+  }, [modePreference, models, modelSummary, pickBestModel]);
+
   const sendMessage = useCallback(async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -92,7 +92,6 @@ function AiChat() {
 
     try {
       const isFastMode = modePreference === "fast";
-      
       const res = await fetch("http://localhost:11434/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -134,16 +133,12 @@ function AiChat() {
           try {
             const json = JSON.parse(line);
             if (json.response) {
-              setMessages((prev) => prev.map((msg, idx) => {
-                if (idx !== prev.length - 1) return msg;
-                return {
-                  ...msg,
-                  content: msg.content + json.response
-                };
-              }));
+              setMessages((prev) => prev.map((msg, idx) => (
+                idx === prev.length - 1 ? { ...msg, content: msg.content + json.response } : msg
+              )));
             }
-          } catch (parseError) {
-            // Ignore incomplete JSON chunks.
+          } catch {
+            // Ollama streams line-delimited JSON; incomplete chunks are retried.
           }
         }
       }
@@ -152,28 +147,28 @@ function AiChat() {
         try {
           const json = JSON.parse(buffer.trim());
           if (json.response) {
-            setMessages((prev) => prev.map((msg, idx) => {
-              if (idx !== prev.length - 1) return msg;
-              return {
-                ...msg,
-                content: msg.content + json.response
-              };
-            }));
+            setMessages((prev) => prev.map((msg, idx) => (
+              idx === prev.length - 1 ? { ...msg, content: msg.content + json.response } : msg
+            )));
           }
         } catch {
-          // ignore leftover parse failures.
+          // Ignore leftover parse failures from partial stream endings.
         }
       }
 
-      setMessages((prev) => prev.map((msg, idx) => idx === prev.length - 1 ? { ...msg, pending: false } : msg));
+      setMessages((prev) => prev.map((msg, idx) => (
+        idx === prev.length - 1 ? { ...msg, pending: false } : msg
+      )));
     } catch (error) {
       const errorText = `Error: ${error.message}. Make sure Ollama is running and CORS is enabled by setting OLLAMA_ORIGINS="*" and restarting Ollama.`;
-      setMessages((prev) => prev.map((msg, idx) => idx === prev.length - 1 ? { ...msg, content: errorText, pending: false, error: true } : msg));
+      setMessages((prev) => prev.map((msg, idx) => (
+        idx === prev.length - 1 ? { ...msg, content: errorText, pending: false, error: true } : msg
+      )));
       console.error("Error talking to Ollama:", error);
     } finally {
       setLoading(false);
     }
-  }, [input, selectedModel]);
+  }, [input, modePreference, selectedModel]);
 
   const clearHistory = async () => {
     try {
@@ -198,46 +193,29 @@ function AiChat() {
           <p className="chat-subtitle">Ollama Powered</p>
           <div className="model-status">{modelSummary}</div>
         </div>
+        <button className="clear-btn" onClick={clearHistory} title="Clear chat history">
+          <VscSync />
+        </button>
         <div className="model-toggle-group">
-          <button
-            className={`model-toggle ${modePreference === "fast" ? "active" : ""}`}
-            type="button"
-            onClick={() => setModePreference("fast")}
-          >
+          <button className={`model-toggle ${modePreference === "fast" ? "active" : ""}`} type="button" onClick={() => setModePreference("fast")}>
             Fast
           </button>
-          <button
-            className={`model-toggle ${modePreference === "quality" ? "active" : ""}`}
-            type="button"
-            onClick={() => setModePreference("quality")}
-          >
+          <button className={`model-toggle ${modePreference === "quality" ? "active" : ""}`} type="button" onClick={() => setModePreference("quality")}>
             Quality
           </button>
         </div>
         <div className="model-selector">
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="model-select"
-          >
+          <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="model-select">
             {models.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
+              <option key={model} value={model}>{model}</option>
             ))}
           </select>
         </div>
-        <button className="clear-btn" onClick={clearHistory} title="Clear chat history">
-          <VscSync />
-        </button>
       </div>
 
       <div className="messages-container">
         {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`message message-${msg.role} ${msg.error ? "error" : ""} ${msg.pending ? "message-pending" : ""}`}
-          >
+          <div key={idx} className={`message message-${msg.role} ${msg.error ? "error" : ""} ${msg.pending ? "message-pending" : ""}`}>
             <div className="message-role">{msg.role === "user" ? "You" : "ANAI"}</div>
             <div className="message-content">{msg.content}</div>
             <div className="message-time">{msg.timestamp.toLocaleTimeString()}</div>
@@ -247,16 +225,9 @@ function AiChat() {
       </div>
 
       <form className="input-form" onSubmit={sendMessage}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask ANAI anything..."
-          className="chat-input"
-          disabled={loading}
-        />
+        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask ANAI anything..." className="chat-input" disabled={loading} />
         <button type="submit" className="send-btn" disabled={loading || !input.trim()}>
-          {loading ? "Waiting..." : <VscSend />}
+          {loading ? "..." : <VscSend />}
         </button>
       </form>
     </div>
