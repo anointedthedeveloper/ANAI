@@ -242,6 +242,23 @@ This project is open source and available under the [MIT License](LICENSE).
 - **Express.js** for the backend framework
 - **VS Code** for the inspiration behind the interface design
 
+## 🚀 Quick Deployment
+
+### One-Command Installation
+
+**Linux/macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/your-repo/anai/main/install.sh | bash
+```
+
+**Windows:**
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/your-repo/anai/main/install.bat" -OutFile "install.bat" | ./install.bat
+```
+
+### Manual Setup
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions for all platforms.
+
 ---
 
 **ANAI** - Your local AI-powered development companion. Build, code, and create with the help of AI, all while keeping your data private and secure.

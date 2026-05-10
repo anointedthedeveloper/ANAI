@@ -1,509 +1,423 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import axios from "axios";
 import * as path from "path-browserify";
+import { VscFolderOpened, VscFile, VscSearch, VscExtensions, VscSettings, VscRepo, VscSync, VscRepoClone } from "react-icons/vsc";
+import AiChat from "./AiChat";
 import "./App.css";
 
+const CodeEditor = lazy(() => import("./CodeEditor"));
+
 function App() {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([]);
   const [activeActivity, setActiveActivity] = useState("explorer");
-  const [terminalOutput, setTerminalOutput] = useState([]);
-  const [terminalInput, setTerminalInput] = useState("");
-  const [terminalHistory, setTerminalHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
   const [files, setFiles] = useState([]);
   const [currentPath, setCurrentPath] = useState("");
   const [openFiles, setOpenFiles] = useState([]);
   const [activeFile, setActiveFile] = useState(null);
   const [fileContent, setFileContent] = useState("");
-  const [sidebarWidth, setSidebarWidth] = useState(250);
-  const [terminalHeight, setTerminalHeight] = useState(200);
-  const [activeTerminalTab, setActiveTerminalTab] = useState("terminal");
-  const [aiSidebarCollapsed, setAiSidebarCollapsed] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState([]);
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalHistory, setTerminalHistory] = useState([]);
+  const [terminalLoading, setTerminalLoading] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [repoToken, setRepoToken] = useState("");
+  const [repoList, setRepoList] = useState([]);
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [repoCloneStatus, setRepoCloneStatus] = useState("");
   const terminalRef = useRef(null);
 
-  // Auto-scroll terminal to bottom
+  const getLanguageFromFileName = (fileName) => {
+    const extension = fileName.split('.').pop().toLowerCase();
+    const languageMap = {
+      js: 'javascript',
+      jsx: 'javascript',
+      ts: 'typescript',
+      tsx: 'typescript',
+      py: 'python',
+      java: 'java',
+      cpp: 'cpp',
+      c: 'c',
+      cs: 'csharp',
+      php: 'php',
+      rb: 'ruby',
+      go: 'go',
+      rs: 'rust',
+      sql: 'sql',
+      html: 'html',
+      css: 'css',
+      scss: 'scss',
+      sass: 'sass',
+      less: 'less',
+      json: 'json',
+      xml: 'xml',
+      yaml: 'yaml',
+      yml: 'yaml',
+      md: 'markdown',
+      sh: 'shell',
+      bash: 'shell',
+      zsh: 'shell',
+      fish: 'shell',
+      dockerfile: 'dockerfile'
+    };
+    return languageMap[extension] || 'plaintext';
+  };
+
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [terminalOutput]);
 
-  // Load files on mount
-  useEffect(() => {
-    loadFiles();
+  const fetchRepositories = useCallback(async () => {
+    try {
+      const res = await axios.get('http://localhost:3001/repo/list');
+      setRepoList(res.data.repos || []);
+    } catch (error) {
+      console.error('Error fetching repo list:', error);
+    }
   }, []);
 
-  const loadFiles = async (path = null) => {
+  const loadFiles = useCallback(async (pathArg = null) => {
     try {
-      const res = await axios.get(`http://localhost:3001/files${path ? `?path=${encodeURIComponent(path)}` : ''}`);
-      setFiles(res.data.tree);
-      setCurrentPath(res.data.currentPath);
+      const query = pathArg ? `?path=${encodeURIComponent(pathArg)}` : '';
+      const res = await axios.get(`http://localhost:3001/files${query}`);
+      setFiles(res.data.tree || []);
+      setCurrentPath(res.data.currentPath || '');
     } catch (error) {
-      console.error("Error loading files:", error);
+      console.error('Error loading files:', error);
     }
-  };
+  }, []);
 
-  const loadFileContent = async (filePath) => {
+  useEffect(() => {
+    fetchRepositories();
+    loadFiles(selectedRepo?.path || null);
+  }, [fetchRepositories, loadFiles, selectedRepo]);
+
+  const cloneRepository = useCallback(async () => {
+    if (!repoUrl.trim()) {
+      setRepoCloneStatus('Repo URL is required.');
+      return;
+    }
+
+    setRepoCloneStatus('Cloning repository...');
+    try {
+      const res = await axios.post('http://localhost:3001/repo/clone', {
+        repoUrl,
+        token: repoToken
+      });
+      setRepoCloneStatus(res.data.message || 'Repository cloned successfully.');
+      setRepoUrl('');
+      setRepoToken('');
+      await fetchRepositories();
+    } catch (error) {
+      setRepoCloneStatus(`Clone failed: ${error.response?.data?.error || error.message}`);
+      console.error('Error cloning repository:', error);
+    }
+  }, [repoToken, repoUrl, fetchRepositories]);
+
+  const loadFileContent = useCallback(async (filePath) => {
     try {
       const res = await axios.get(`http://localhost:3001/file?path=${encodeURIComponent(filePath)}`);
-      setFileContent(res.data.content);
-      
-      // Add to open files if not already there
-      if (!openFiles.find(f => f.path === filePath)) {
-        setOpenFiles([...openFiles, { 
-          name: filePath.split('/').pop() || filePath.split('\\').pop(), 
-          path: filePath 
-        }]);
-      }
+      setFileContent(res.data.content || '');
+
+      setOpenFiles((prev) => {
+        if (prev.some((f) => f.path === filePath)) return prev;
+        return [
+          ...prev,
+          {
+            name: filePath.split('/').pop() || filePath.split('\\').pop(),
+            path: filePath
+          }
+        ];
+      });
+
       setActiveFile(filePath);
     } catch (error) {
-      console.error("Error loading file:", error);
+      console.error('Error loading file:', error);
     }
-  };
+  }, []);
 
-  const saveFile = async () => {
+  const saveFile = useCallback(async () => {
     if (!activeFile) return;
-    
     try {
-      await axios.post("http://localhost:3001/file", {
+      await axios.post('http://localhost:3001/file', {
         filePath: activeFile,
         content: fileContent
       });
-      console.log("File saved successfully");
     } catch (error) {
-      console.error("Error saving file:", error);
+      console.error('Error saving file:', error);
     }
-  };
+  }, [activeFile, fileContent]);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+  const executeTerminalCommand = useCallback(async (e) => {
+    if (e.key !== 'Enter') return;
+    if (!terminalInput.trim()) return;
 
-    const userMessage = { user: input, ai: "", timestamp: new Date() };
-    setMessages([...messages, userMessage]);
-    setInput("");
+    const command = terminalInput.trim();
+    setTerminalOutput((prev) => [...prev, `$ ${command}`]);
+    setTerminalHistory((prev) => [...prev, command]);
+    setTerminalLoading(true);
+
+    if (command === 'clear') {
+      setTerminalOutput([]);
+      setTerminalInput('');
+      setTerminalLoading(false);
+      return;
+    }
+
+    if (command === 'history') {
+      setTerminalOutput((prev) => [...prev, ...terminalHistory.map((cmd, i) => `${i + 1}: ${cmd}`)]);
+      setTerminalInput('');
+      setTerminalLoading(false);
+      return;
+    }
 
     try {
-      const res = await axios.post("http://localhost:3001/ask", {
-        prompt: input
+      const res = await axios.post('http://localhost:3001/ask', {
+        prompt: `RUN: ${command}`
       });
 
-      const aiResponse = res.data;
-      setMessages(prev => [...prev.slice(0, -1), { 
-        ...userMessage, 
-        ai: JSON.stringify(aiResponse, null, 2),
-        timestamp: new Date()
-      }]);
-
-      // Handle tool responses
-      if (aiResponse.tool === "run") {
-        setTerminalOutput(prev => [...prev, 
-          `$ ${aiResponse.command}`,
-          aiResponse.stdout || aiResponse.error || "Command executed"
-        ]);
+      if (res.data.tool === 'run') {
+        setTerminalOutput((prev) => [...prev, res.data.stdout || res.data.error || 'Command executed']);
       }
-
-    } catch (err) {
-      setMessages(prev => [...prev.slice(0, -1), { 
-        ...userMessage, 
-        ai: `Error: ${err.message}`,
-        timestamp: new Date()
-      }]);
+    } catch (error) {
+      setTerminalOutput((prev) => [...prev, `Error: ${error.message}`]);
+    } finally {
+      setTerminalInput('');
+      setTerminalLoading(false);
     }
-  };
+  }, [terminalHistory, terminalInput]);
 
-  const executeTerminalCommand = async (e) => {
-    if (e.key === "Enter" && terminalInput.trim()) {
-      setTerminalOutput(prev => [...prev, `$ ${terminalInput}`]);
-      
-      // Add to history
-      setTerminalHistory(prev => [...prev, terminalInput]);
-      setHistoryIndex(-1);
-      
-      if (terminalInput.trim() === "clear") {
-        setTerminalOutput([]);
-      } else if (terminalInput.trim() === "history") {
-        setTerminalOutput(prev => [...prev, 
-          ...terminalHistory.map((cmd, i) => `${i + 1}: ${cmd}`)
-        ]);
-      } else {
-        try {
-          const res = await axios.post("http://localhost:3001/ask", {
-            prompt: `RUN: ${terminalInput}`
-          });
-
-          if (res.data.tool === "run") {
-            setTerminalOutput(prev => [...prev, 
-              res.data.stdout || res.data.error || "Command executed"
-            ]);
-          }
-        } catch (error) {
-          setTerminalOutput(prev => [...prev, `Error: ${error.message}`]);
-        }
-      }
-      
-      setTerminalInput("");
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (terminalHistory.length > 0) {
-        const newIndex = historyIndex < terminalHistory.length - 1 ? historyIndex + 1 : historyIndex;
-        setHistoryIndex(newIndex);
-        setTerminalInput(terminalHistory[terminalHistory.length - 1 - newIndex]);
-      }
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (historyIndex > 0) {
-        const newIndex = historyIndex - 1;
-        setHistoryIndex(newIndex);
-        setTerminalInput(terminalHistory[terminalHistory.length - 1 - newIndex]);
-      } else if (historyIndex === 0) {
-        setHistoryIndex(-1);
-        setTerminalInput("");
-      }
-    }
-  };
-
-  const renderCodeBlock = (text) => {
-    const lines = text.split('\n');
-    return (
-      <pre className="code-block">
-        <code>{lines.map((line, i) => (
-          <div key={i}>{line || ' '}</div>
-        ))}</code>
-      </pre>
-    );
-  };
-
-  const renderMessage = (msg, index) => {
-    const isJson = msg.ai && (msg.ai.startsWith('{') || msg.ai.startsWith('['));
-    
-    return (
-      <div key={index} className="message">
-        <div className="message-user">
-          <strong>You:</strong> {msg.user}
+  const renderFileTree = useCallback((fileList, depth = 0) => {
+    return fileList.map((file, index) => {
+      const fullPath = path.join(currentPath, file.path);
+      return (
+        <div
+          key={`${file.name}-${index}`}
+          className={`file-item file-depth-${depth}`}
+          onClick={() => {
+            if (file.type === 'folder') {
+              loadFiles(fullPath);
+            } else {
+              loadFileContent(fullPath);
+            }
+          }}
+        >
+          <span className="file-icon">{file.type === 'folder' ? <VscFolderOpened /> : <VscFile />}</span>
+          <span className="file-name">{file.name}</span>
+          {file.children && renderFileTree(file.children, depth + 1)}
         </div>
-        <div className="message-ai">
-          <strong>ANAI:</strong>
-          {isJson ? renderCodeBlock(msg.ai) : <div>{msg.ai}</div>}
-        </div>
-        <div className="message-time">
-          {msg.timestamp && new Date(msg.timestamp).toLocaleTimeString()}
-        </div>
-      </div>
-    );
-  };
+      );
+    });
+  }, [currentPath, loadFiles, loadFileContent]);
 
-  const renderFileTree = (fileList, depth = 0) => {
-    return fileList.map((file, index) => (
-      <div 
-        key={index} 
-        className={`file-item file-depth-${depth}`}
-        onClick={() => {
-          if (file.type === 'folder') {
-            loadFiles(path.join(currentPath, file.path));
-          } else {
-            loadFileContent(path.join(currentPath, file.path));
-          }
-        }}
-      >
-        <span className="file-icon">
-          {file.type === 'folder' ? '📁' : '📄'}
-        </span>
-        <span className="file-name">{file.name}</span>
-        {file.children && renderFileTree(file.children, depth + 1)}
-      </div>
-    ));
-  };
+  const fileTree = useMemo(() => renderFileTree(files), [files, renderFileTree]);
 
   return (
     <div className="ide-container">
-      {/* Header */}
-      <div className="header">
-        <h1>ANAI - AI Agent IDE</h1>
+      <header className="header">
+        <div className="header-left">
+          <div>
+            <h1>ANAI</h1>
+            <p>AI development workspace</p>
+          </div>
+        </div>
         <div className="header-actions">
-          <button onClick={() => setMessages([])}>Clear Chat</button>
+          <button onClick={() => loadFiles(selectedRepo?.path || null)}>
+            <VscSync className="header-icon" /> Refresh
+          </button>
           <button onClick={() => setTerminalOutput([])}>Clear Terminal</button>
         </div>
-      </div>
+      </header>
 
-      {/* Activity Bar */}
-      <div className="activity-bar">
-        <div 
+      <nav className="activity-bar">
+        <button
           className={`activity-item ${activeActivity === 'explorer' ? 'active' : ''}`}
           onClick={() => setActiveActivity('explorer')}
           title="Explorer"
         >
-          📁
-        </div>
-        <div 
+          <VscFolderOpened />
+        </button>
+        <button
           className={`activity-item ${activeActivity === 'search' ? 'active' : ''}`}
           onClick={() => setActiveActivity('search')}
           title="Search"
         >
-          🔍
-        </div>
-        <div 
+          <VscSearch />
+        </button>
+        <button
           className={`activity-item ${activeActivity === 'extensions' ? 'active' : ''}`}
           onClick={() => setActiveActivity('extensions')}
           title="Extensions"
         >
-          🧩
-        </div>
-        <div 
+          <VscExtensions />
+        </button>
+        <button
           className={`activity-item ${activeActivity === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveActivity('settings')}
-          title="Settings"
+          title="Repo & Settings"
         >
-          ⚙️
-        </div>
-      </div>
+          <VscSettings />
+        </button>
+      </nav>
 
-      {/* Main Content Grid */}
-      <div className="main-content">
-        {/* Sidebar */}
-        <div className="sidebar" style={{ width: sidebarWidth }}>
-          <div className="sidebar-header">
-            <h3>Explorer</h3>
-          </div>
-          <div className="file-tree">
-            {renderFileTree(files)}
-          </div>
+      <aside className="explorer-panel">
+        <div className="panel-header">
+          <h2>{activeActivity === 'settings' ? 'Repository Settings' : activeActivity === 'search' ? 'Search' : activeActivity === 'extensions' ? 'Extensions' : 'Explorer'}</h2>
         </div>
 
-        {/* Content Area */}
-        <div className="content-area">
-          {/* Editor Area */}
-          <div className="editor-area">
-            {/* File Tabs */}
-            {openFiles.length > 0 && (
-              <div className="file-tabs">
-                {openFiles.map((file, index) => (
-                  <div
-                    key={index}
-                    className={`file-tab ${activeFile === file.path ? 'active' : ''}`}
-                    onClick={() => loadFileContent(file.path)}
-                  >
-                    {file.name}
-                    <button 
-                      className="close-tab"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenFiles(openFiles.filter(f => f.path !== file.path));
-                        if (activeFile === file.path) {
-                          setActiveFile(null);
-                          setFileContent("");
-                        }
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Breadcrumbs */}
-            {activeFile && (
-              <div className="breadcrumbs">
-                <span className="breadcrumb-item">ANAI</span>
-                <span className="breadcrumb-separator">›</span>
-                <span className="breadcrumb-item">
-                  {activeFile.includes('\\') ? activeFile.split('\\')[0] : activeFile.split('/')[0]}
-                </span>
-                {activeFile.split('\\').length > 1 || activeFile.split('/').length > 1 ? (
-                  <>
-                    <span className="breadcrumb-separator">›</span>
-                    <span className="breadcrumb-item">
-                      {activeFile.includes('\\') ? activeFile.split('\\').slice(1).join('\\') : activeFile.split('/').slice(1).join('/')}
-                    </span>
-                  </>
-                ) : null}
-              </div>
-            )}
-            
-            {/* Code Editor */}
-            {activeFile ? (
-              <div className="code-editor">
-                <div className="editor-header">
-                  <span>{activeFile}</span>
-                  <button onClick={saveFile} className="save-button">Save</button>
-                </div>
-                <div className="editor-container">
-                  <div className="line-numbers">
-                    {fileContent.split('\n').map((_, i) => (
-                      <div key={i} className="line-number">{i + 1}</div>
-                    ))}
-                  </div>
-                  <textarea
-                    value={fileContent}
-                    onChange={(e) => setFileContent(e.target.value)}
-                    className="editor-textarea"
-                    placeholder="File content..."
-                    spellCheck={false}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="no-file-open">
-                <p>No file opened. Select a file from the explorer to start editing.</p>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Panel - Chat and Terminal */}
-          <div className="bottom-panel">
-            {/* Chat Area */}
-            <div className="chat-container">
-              <div className="panel-header">
-                <span>ANAI Assistant</span>
-              </div>
-              <div className="messages">
-                {messages.map((msg, i) => renderMessage(msg, i))}
-              </div>
-              
-              <div className="input-area">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Ask ANAI anything..."
-                  className="chat-input"
-                />
-                <button onClick={sendMessage} className="send-button">Send</button>
-              </div>
-            </div>
-
-            {/* Terminal */}
-            <div className="terminal" style={{ height: terminalHeight }}>
-              <div className="terminal-header">
-                <span>Terminal</span>
-                <div className="terminal-resize" />
-              </div>
-              <div className="terminal-body" ref={terminalRef}>
-                {terminalOutput.map((output, i) => (
-                  <div key={i} className="terminal-line">{output}</div>
-                ))}
-                <input
-                  value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
-                  onKeyPress={executeTerminalCommand}
-                  placeholder="Type command..."
-                  className="terminal-input"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* AI Assistant Sidebar */}
-        <div className={`ai-sidebar ${aiSidebarCollapsed ? 'collapsed' : ''}`}>
-          <div className="ai-sidebar-header">
-            <span>ANAI Assistant</span>
-            <button 
-              className="collapse-btn"
-              onClick={() => setAiSidebarCollapsed(!aiSidebarCollapsed)}
-            >
-              {aiSidebarCollapsed ? '◀' : '▶'}
-            </button>
-          </div>
-          {!aiSidebarCollapsed && (
-            <div className="ai-chat-container">
-              <div className="messages">
-                {messages.map((msg, i) => renderMessage(msg, i))}
-              </div>
-              
-              <div className="input-area">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Ask ANAI anything..."
-                  className="chat-input"
-                />
-                <button onClick={sendMessage} className="send-button">Send</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom Panel - Terminal */}
-      <div className="bottom-panel">
-        <div className="terminal-tabs">
-          <div 
-            className={`terminal-tab ${activeTerminalTab === 'terminal' ? 'active' : ''}`}
-            onClick={() => setActiveTerminalTab('terminal')}
-          >
-            Terminal
-          </div>
-          <div 
-            className={`terminal-tab ${activeTerminalTab === 'output' ? 'active' : ''}`}
-            onClick={() => setActiveTerminalTab('output')}
-          >
-            Output
-          </div>
-          <div 
-            className={`terminal-tab ${activeTerminalTab === 'debug' ? 'active' : ''}`}
-            onClick={() => setActiveTerminalTab('debug')}
-          >
-            Debug Console
-          </div>
-        </div>
-        
-        {activeTerminalTab === 'terminal' && (
-          <div className="terminal" style={{ height: terminalHeight }}>
-            <div className="terminal-body" ref={terminalRef}>
-              {terminalOutput.map((output, i) => (
-                <div key={i} className="terminal-line">{output}</div>
-              ))}
+        {activeActivity === 'settings' ? (
+          <div className="settings-panel">
+            <div className="settings-note">Clone a GitHub repository using a personal access token.</div>
+            <label className="settings-label">
+              Repository URL
               <input
-                value={terminalInput}
-                onChange={(e) => setTerminalInput(e.target.value)}
-                onKeyPress={executeTerminalCommand}
-                placeholder="Type command..."
-                className="terminal-input"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/owner/repo.git"
               />
+            </label>
+            <label className="settings-label">
+              Personal Access Token
+              <input
+                value={repoToken}
+                onChange={(e) => setRepoToken(e.target.value)}
+                type="password"
+                placeholder="ghp_..."
+              />
+            </label>
+            <button className="clone-button" onClick={cloneRepository}>
+              <VscRepoClone className="button-icon" /> Clone Repository
+            </button>
+            {repoCloneStatus && <div className="repo-status">{repoCloneStatus}</div>}
+            <div className="repo-list">
+              <div className="repo-list-title">Cloned Repositories</div>
+              {repoList.length === 0 ? (
+                <div className="repo-empty">No cloned repos yet.</div>
+              ) : (
+                repoList.map((repo) => (
+                  <button
+                    key={repo.path}
+                    className={`repo-item ${selectedRepo?.path === repo.path ? 'selected' : ''}`}
+                    onClick={() => {
+                      setSelectedRepo(repo);
+                      loadFiles(repo.path);
+                    }}
+                  >
+                    <VscRepo className="repo-icon" />
+                    <span>{repo.name}</span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
+        ) : activeActivity === 'search' ? (
+          <div className="panel-empty">Search support will be added soon.</div>
+        ) : activeActivity === 'extensions' ? (
+          <div className="panel-empty">Extensions panel is not yet available.</div>
+        ) : (
+          <div className="file-tree">{fileTree}</div>
         )}
-        
-        {activeTerminalTab === 'output' && (
-          <div className="output-panel">
-            <div className="output-content">
-              <p>Build output and logs will appear here...</p>
+      </aside>
+
+      <main className="editor-panel">
+        <div className="editor-toolbar">
+          <div className="editor-path">{activeFile || 'No file open'}</div>
+          <button className="save-button" onClick={saveFile} disabled={!activeFile}>
+            Save
+          </button>
+        </div>
+
+        <div className="file-tabs">
+          {openFiles.map((file, index) => (
+            <div
+              key={`${file.path}-${index}`}
+              className={`file-tab ${activeFile === file.path ? 'active' : ''}`}
+              onClick={() => loadFileContent(file.path)}
+            >
+              <span>{file.name}</span>
+              <button
+                className="close-tab"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextFiles = openFiles.filter((f) => f.path !== file.path);
+                  setOpenFiles(nextFiles);
+                  if (activeFile === file.path) {
+                    if (nextFiles.length) {
+                      loadFileContent(nextFiles[0].path);
+                    } else {
+                      setActiveFile(null);
+                      setFileContent('');
+                    }
+                  }
+                }}
+              >
+                ×
+              </button>
             </div>
-          </div>
-        )}
-        
-        {activeTerminalTab === 'debug' && (
-          <div className="debug-panel">
-            <div className="debug-content">
-              <p>Debug console output will appear here...</p>
+          ))}
+        </div>
+
+        <div className="code-editor-area">
+          {activeFile ? (
+            <Suspense fallback={<div className="editor-loading">Loading editor…</div>}>
+              <CodeEditor
+                value={fileContent}
+                onChange={setFileContent}
+                language={getLanguageFromFileName(activeFile)}
+                theme="vs-dark"
+              />
+            </Suspense>
+          ) : (
+            <div className="no-file-open">
+              <p>Select a file from the explorer to start editing.</p>
             </div>
-          </div>
-        )}
-      </div>
-      
-      {/* Status Bar */}
-      <div className="status-bar">
-        <div className="status-left">
-          {activeFile && (
-            <span className="status-item">
-              {activeFile.split('/').pop() || activeFile.split('\\').pop()}
-            </span>
           )}
-          <span className="status-item">
-            {openFiles.length > 0 ? `${openFiles.length} file${openFiles.length > 1 ? 's' : ''} open` : 'No files open'}
-          </span>
-          <span className="status-item">main</span>
-          <span className="status-item">UTF-8</span>
-          <span className="status-item">JavaScript</span>
+        </div>
+      </main>
+
+      <aside className="ai-panel">
+        <div className="panel-header">
+          <h2>AI Chat</h2>
+        </div>
+        <AiChat />
+      </aside>
+
+      <section className="terminal-panel">
+        <div className="panel-header">
+          <h2>Terminal</h2>
+        </div>
+        <div className="terminal-body" ref={terminalRef}>
+          {terminalOutput.length === 0 ? (
+            <div className="terminal-empty">Type a command and press Enter.</div>
+          ) : (
+            terminalOutput.map((output, index) => (
+              <div key={index} className="terminal-line">{output}</div>
+            ))
+          )}
+        </div>
+        <div className="terminal-input-row">
+          <input
+            value={terminalInput}
+            onChange={(e) => setTerminalInput(e.target.value)}
+            onKeyDown={executeTerminalCommand}
+            placeholder="Type command..."
+            className="terminal-input"
+            disabled={terminalLoading}
+          />
+        </div>
+      </section>
+
+      <footer className="status-bar">
+        <div className="status-left">
+          <span>{activeFile ? activeFile.split(/[\\/]/).pop() : 'No file selected'}</span>
+          <span>{openFiles.length} open file{openFiles.length === 1 ? '' : 's'}</span>
+          <span>{selectedRepo ? `Repo: ${selectedRepo.name}` : 'Workspace'}</span>
         </div>
         <div className="status-right">
-          <span className="status-item">ANAI v1.0</span>
-          <span className="status-item">Local</span>
+          <span>ANAI v1.0</span>
+          <span>Backend: 3001</span>
         </div>
-      </div>
+      </footer>
     </div>
   );
 }
