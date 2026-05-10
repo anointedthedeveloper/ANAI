@@ -7,6 +7,8 @@ import {
   VscExtensions,
   VscFile,
   VscFolderOpened,
+  VscNewFolder,
+  VscNewFile,
   VscRepo,
   VscRepoClone,
   VscSave,
@@ -33,12 +35,17 @@ function App() {
   const [terminalLoading, setTerminalLoading] = useState(false);
   const [terminalProfiles, setTerminalProfiles] = useState([]);
   const [activeTerminalProfile, setActiveTerminalProfile] = useState("");
+  const [showExplorer, setShowExplorer] = useState(true);
+  const [showChat, setShowChat] = useState(true);
+  const [showTerminal, setShowTerminal] = useState(true);
   const [repoUrl, setRepoUrl] = useState("");
   const [repoToken, setRepoToken] = useState("");
   const [repoList, setRepoList] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [repoCloneStatus, setRepoCloneStatus] = useState("");
   const terminalRef = useRef(null);
+  const terminalInputRef = useRef(null);
+  const editorRef = useRef(null);
 
   const getLanguageFromFileName = (fileName) => {
     const extension = fileName.split(".").pop().toLowerCase();
@@ -104,6 +111,11 @@ function App() {
 
   const loadFiles = useCallback(async (pathArg = null) => {
     try {
+      if (!pathArg) {
+        setFiles([]);
+        setCurrentPath("");
+        return;
+      }
       const query = pathArg ? `?path=${encodeURIComponent(pathArg)}` : "";
       const res = await axios.get(`http://localhost:3001/files${query}`);
       setFiles(res.data.tree || []);
@@ -113,11 +125,51 @@ function App() {
     }
   }, []);
 
+  const openFolder = useCallback(async () => {
+    try {
+      const res = await axios.post("http://localhost:3001/workspace/select-folder");
+      if (res.data.cancelled) return;
+
+      const workspace = res.data;
+      setSelectedRepo(workspace);
+      setActiveActivity("explorer");
+      localStorage.setItem("anai.workspacePath", workspace.path);
+      await loadFiles(workspace.path);
+    } catch (error) {
+      const enteredPath = window.prompt("Could not open the Windows folder picker. Enter the full folder path to open in ANAI:");
+      if (!enteredPath?.trim()) return;
+
+      try {
+        const res = await axios.post("http://localhost:3001/workspace/validate", {
+          path: enteredPath.trim()
+        });
+        const workspace = res.data;
+        setSelectedRepo(workspace);
+        setActiveActivity("explorer");
+        localStorage.setItem("anai.workspacePath", workspace.path);
+        await loadFiles(workspace.path);
+      } catch (fallbackError) {
+        window.alert(fallbackError.response?.data?.error || fallbackError.message);
+      }
+    }
+  }, [loadFiles]);
+
   useEffect(() => {
     fetchRepositories();
     fetchTerminalProfiles();
-    loadFiles(selectedRepo?.path || null);
-  }, [fetchRepositories, fetchTerminalProfiles, loadFiles, selectedRepo]);
+  }, [fetchRepositories, fetchTerminalProfiles]);
+
+  useEffect(() => {
+    const storedPath = localStorage.getItem("anai.workspacePath");
+    if (!storedPath) return;
+
+    axios.post("http://localhost:3001/workspace/validate", { path: storedPath })
+      .then((res) => {
+        setSelectedRepo(res.data);
+        loadFiles(res.data.path);
+      })
+      .catch(() => localStorage.removeItem("anai.workspacePath"));
+  }, [loadFiles]);
 
   const cloneRepository = useCallback(async () => {
     if (!repoUrl.trim()) {
@@ -163,6 +215,49 @@ function App() {
     }
   }, []);
 
+  const createFile = useCallback(async () => {
+    if (!selectedRepo?.path) {
+      await openFolder();
+      return;
+    }
+
+    const name = window.prompt("New file name:");
+    if (!name?.trim()) return;
+
+    try {
+      const res = await axios.post("http://localhost:3001/workspace/create-file", {
+        workspacePath: selectedRepo.path,
+        currentPath: currentPath || selectedRepo.path,
+        name: name.trim()
+      });
+      await loadFiles(currentPath || selectedRepo.path);
+      await loadFileContent(res.data.path);
+    } catch (error) {
+      window.alert(error.response?.data?.error || error.message);
+    }
+  }, [currentPath, loadFileContent, loadFiles, openFolder, selectedRepo]);
+
+  const createFolder = useCallback(async () => {
+    if (!selectedRepo?.path) {
+      await openFolder();
+      return;
+    }
+
+    const name = window.prompt("New folder name:");
+    if (!name?.trim()) return;
+
+    try {
+      await axios.post("http://localhost:3001/workspace/create-folder", {
+        workspacePath: selectedRepo.path,
+        currentPath: currentPath || selectedRepo.path,
+        name: name.trim()
+      });
+      await loadFiles(currentPath || selectedRepo.path);
+    } catch (error) {
+      window.alert(error.response?.data?.error || error.message);
+    }
+  }, [currentPath, loadFiles, openFolder, selectedRepo]);
+
   const saveFile = useCallback(async () => {
     if (!activeFile) return;
     try {
@@ -175,25 +270,24 @@ function App() {
     }
   }, [activeFile, fileContent]);
 
-  const executeTerminalCommand = useCallback(async (e) => {
-    if (e.key !== "Enter") return;
-    if (!terminalInput.trim()) return;
+  const runTerminalCommand = useCallback(async (commandText, options = {}) => {
+    if (!commandText.trim()) return;
 
-    const command = terminalInput.trim();
+    const command = commandText.trim();
     setTerminalOutput((prev) => [...prev, `$ ${command}`]);
     setTerminalHistory((prev) => [...prev, command]);
     setTerminalLoading(true);
 
     if (command === "clear") {
       setTerminalOutput([]);
-      setTerminalInput("");
+      if (!options.keepInput) setTerminalInput("");
       setTerminalLoading(false);
       return;
     }
 
     if (command === "history") {
       setTerminalOutput((prev) => [...prev, ...terminalHistory.map((cmd, i) => `${i + 1}: ${cmd}`)]);
-      setTerminalInput("");
+      if (!options.keepInput) setTerminalInput("");
       setTerminalLoading(false);
       return;
     }
@@ -214,10 +308,16 @@ function App() {
     } catch (error) {
       setTerminalOutput((prev) => [...prev, `Error: ${error.response?.data?.error || error.message}`]);
     } finally {
-      setTerminalInput("");
+      if (!options.keepInput) setTerminalInput("");
       setTerminalLoading(false);
+      requestAnimationFrame(() => terminalInputRef.current?.focus());
     }
-  }, [activeTerminalProfile, currentPath, selectedRepo, terminalHistory, terminalInput]);
+  }, [activeTerminalProfile, currentPath, selectedRepo, terminalHistory]);
+
+  const executeTerminalCommand = useCallback(async (e) => {
+    if (e.key !== "Enter") return;
+    await runTerminalCommand(terminalInput);
+  }, [runTerminalCommand, terminalInput]);
 
   const renderFileTree = useCallback((fileList, depth = 0) => {
     return fileList.map((file, index) => {
@@ -276,7 +376,10 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
-          <button onClick={() => loadFiles(selectedRepo?.path || null)}>
+          <button onClick={openFolder}>
+            <VscNewFolder className="header-icon" /> Open Folder
+          </button>
+          <button onClick={() => loadFiles(selectedRepo?.path || null)} disabled={!selectedRepo?.path}>
             <VscSync className="header-icon" /> Refresh
           </button>
           <button onClick={() => setTerminalOutput([])}>
@@ -321,6 +424,11 @@ function App() {
               <div className="panel-empty">Search support will be added soon.</div>
             ) : activeActivity === "extensions" ? (
               <div className="panel-empty">Extensions panel is not yet available.</div>
+            ) : !selectedRepo?.path ? (
+              <div className="empty-workspace">
+                <div className="empty-workspace-title">No folder open</div>
+                <button onClick={openFolder}><VscNewFolder /> Open Folder</button>
+              </div>
             ) : (
               <div className="file-tree">{fileTree}</div>
             )}
@@ -373,16 +481,16 @@ function App() {
                     ))}
                   </select>
                 </div>
-                <div className="terminal-body" ref={terminalRef}>
+                <div className="terminal-body terminal-interactive" ref={terminalRef} onClick={() => terminalInputRef.current?.focus()}>
                   {terminalOutput.length === 0 ? (
                     <div className="terminal-empty">Type a command and press Enter.</div>
                   ) : terminalOutput.map((output, index) => (
                     <pre key={index} className="terminal-line">{output}</pre>
                   ))}
-                </div>
-                <div className="terminal-input-row">
-                  <span className="terminal-prompt">$</span>
-                  <input value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)} onKeyDown={executeTerminalCommand} placeholder="Type command..." className="terminal-input" disabled={terminalLoading} />
+                  <div className={`terminal-live-line ${terminalLoading ? "running" : ""}`}>
+                    <span className="terminal-prompt">$</span>
+                    <input ref={terminalInputRef} value={terminalInput} onChange={(e) => setTerminalInput(e.target.value)} onKeyDown={executeTerminalCommand} placeholder={terminalLoading ? "Running..." : "Type command..."} className="terminal-input" disabled={terminalLoading} />
+                  </div>
                 </div>
               </Panel>
             </PanelGroup>
@@ -394,7 +502,14 @@ function App() {
             <div className="panel-header">
               <h2>AI Chat</h2>
             </div>
-            <AiChat />
+            <AiChat
+              workspacePath={selectedRepo?.path || currentPath}
+              terminalProfileId={activeTerminalProfile}
+              onWorkspaceRefresh={() => loadFiles(selectedRepo?.path || currentPath)}
+              onOpenFile={loadFileContent}
+              onTerminalOutput={(line) => setTerminalOutput((prev) => [...prev, line])}
+              onRunTerminalCommand={(command) => runTerminalCommand(command)}
+            />
           </Panel>
         </PanelGroup>
       </div>

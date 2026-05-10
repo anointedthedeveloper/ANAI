@@ -1,7 +1,15 @@
-import React from "react";
+import React, { forwardRef, useImperativeHandle, useRef } from "react";
 import Editor from "@monaco-editor/react";
 
-const CodeEditor = ({ value, onChange, language = "javascript", theme = "vs-dark" }) => {
+const CodeEditor = forwardRef(({ value, onChange, language = "javascript", theme = "vs-dark" }, ref) => {
+  const editorRef = useRef(null);
+
+  useImperativeHandle(ref, () => ({
+    undo: () => editorRef.current?.trigger("toolbar", "undo"),
+    redo: () => editorRef.current?.trigger("toolbar", "redo"),
+    focus: () => editorRef.current?.focus()
+  }), []);
+
   return (
     <div className="monaco-editor-container" style={{ height: "100%", overflow: "hidden" }}>
       <Editor
@@ -9,6 +17,9 @@ const CodeEditor = ({ value, onChange, language = "javascript", theme = "vs-dark
         defaultLanguage={language}
         value={value}
         theme={theme}
+        onMount={(editor) => {
+          editorRef.current = editor;
+        }}
         onChange={(newValue) => onChange(newValue || "")}
         options={{
           fontSize: 14,
@@ -35,6 +46,6 @@ const CodeEditor = ({ value, onChange, language = "javascript", theme = "vs-dark
       />
     </div>
   );
-};
+});
 
 export default CodeEditor;

@@ -10,12 +10,37 @@ app.use(cors());
 app.use(express.json());
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
+const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const REPO_BASE = path.resolve(process.cwd(), "repos");
 if (!fs.existsSync(REPO_BASE)) {
   fs.mkdirSync(REPO_BASE, { recursive: true });
 }
 
 let history = [];
+
+const resolveWorkspacePath = (workspacePath) => {
+  if (!workspacePath || !workspacePath.trim()) return "";
+  const resolved = path.resolve(workspacePath);
+  return fs.existsSync(resolved) && fs.statSync(resolved).isDirectory() ? resolved : "";
+};
+
+const resolvePathInsideWorkspace = (workspacePath, targetPath) => {
+  const workspace = resolveWorkspacePath(workspacePath);
+  if (!workspace) {
+    throw new Error("Select a valid workspace folder first.");
+  }
+
+  const resolvedTarget = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(workspace, targetPath);
+
+  const relative = path.relative(workspace, resolvedTarget);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("File path must stay inside the selected workspace.");
+  }
+
+  return resolvedTarget;
+};
 
 const executableExists = (command) => {
   const lookupCommand = process.platform === "win32" ? "where" : "command";
@@ -73,6 +98,41 @@ const getAvailableTerminalProfiles = async () => {
   })));
   const available = checks.filter((profile) => profile.available);
   return available.length ? available : [checks[0]];
+};
+
+const openNativeFolderPicker = () => {
+  if (process.platform !== "win32") {
+    return Promise.resolve("");
+  }
+
+  const script = [
+    "Add-Type -AssemblyName System.Windows.Forms;",
+    "$dialog = New-Object System.Windows.Forms.OpenFileDialog;",
+    "$dialog.Title = 'Select a folder for ANAI';",
+    "$dialog.ValidateNames = $false;",
+    "$dialog.CheckFileExists = $false;",
+    "$dialog.CheckPathExists = $true;",
+    "$dialog.FileName = 'Select Folder';",
+    "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
+    "  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+    "  Write-Output ([System.IO.Path]::GetDirectoryName($dialog.FileName))",
+    "}"
+  ].join(" ");
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { windowsHide: false, timeout: 120000 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr || error.message));
+          return;
+        }
+        resolve(stdout.trim());
+      }
+    );
+  });
 };
 
 const getRepoName = (repoUrl) => {
@@ -176,6 +236,38 @@ app.get("/history", (req, res) => {
   res.json({ history });
 });
 
+app.post("/workspace/validate", (req, res) => {
+  const workspacePath = resolveWorkspacePath(req.body.path);
+  if (!workspacePath) {
+    return res.status(400).json({ error: "Folder does not exist or is not accessible." });
+  }
+  res.json({
+    path: workspacePath,
+    name: path.basename(workspacePath) || workspacePath
+  });
+});
+
+app.post("/workspace/select-folder", async (req, res) => {
+  try {
+    const selectedPath = await openNativeFolderPicker();
+    if (!selectedPath) {
+      return res.json({ cancelled: true });
+    }
+
+    const workspacePath = resolveWorkspacePath(selectedPath);
+    if (!workspacePath) {
+      return res.status(400).json({ error: "Selected folder is not accessible." });
+    }
+
+    res.json({
+      path: workspacePath,
+      name: path.basename(workspacePath) || workspacePath
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const directoryCache = new Map();
 
 const getDirectoryTree = (dirPath, relativePath = "") => {
@@ -230,8 +322,15 @@ const getDirectoryTree = (dirPath, relativePath = "") => {
 };
 
 app.get("/files", (req, res) => {
-  const dirPath = req.query.path || process.cwd();
+  const dirPath = req.query.path;
+  if (!dirPath) {
+    return res.json({ tree: [], currentPath: "" });
+  }
+
   try {
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+      return res.status(400).json({ error: "Folder does not exist or is not accessible." });
+    }
     const tree = getDirectoryTree(dirPath);
     res.json({ tree, currentPath: dirPath });
   } catch (error) {
@@ -271,19 +370,146 @@ app.post("/file", (req, res) => {
   }
 });
 
-app.get("/models", async (req, res) => {
+app.post("/workspace/create-file", (req, res) => {
   try {
-    const response = await axios.get("http://localhost:11434/api/tags");
-    res.json(response.data);
+    const { workspacePath, currentPath: requestedCurrentPath, name, content = "" } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "File name is required." });
+    }
+
+    const workspace = resolveWorkspacePath(workspacePath);
+    const basePath = requestedCurrentPath && resolveWorkspacePath(requestedCurrentPath)
+      ? requestedCurrentPath
+      : workspace;
+    const targetPath = resolvePathInsideWorkspace(workspace, path.join(path.relative(workspace, basePath), name.trim()));
+
+    if (fs.existsSync(targetPath)) {
+      return res.status(400).json({ error: "File already exists." });
+    }
+
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, content, "utf-8");
+    directoryCache.clear();
+    res.json({ path: targetPath, name: path.basename(targetPath) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/workspace/create-folder", (req, res) => {
+  try {
+    const { workspacePath, currentPath: requestedCurrentPath, name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "Folder name is required." });
+    }
+
+    const workspace = resolveWorkspacePath(workspacePath);
+    const basePath = requestedCurrentPath && resolveWorkspacePath(requestedCurrentPath)
+      ? requestedCurrentPath
+      : workspace;
+    const targetPath = resolvePathInsideWorkspace(workspace, path.join(path.relative(workspace, basePath), name.trim()));
+
+    if (fs.existsSync(targetPath)) {
+      return res.status(400).json({ error: "Folder already exists." });
+    }
+
+    fs.mkdirSync(targetPath, { recursive: true });
+    directoryCache.clear();
+    res.json({ path: targetPath, name: path.basename(targetPath) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/models", async (req, res) => {
+  const cloudModels = [
+    { name: "gpt-4.1:cloud", provider: "OpenAI", cloud: true },
+    { name: "gpt-4.1-mini:cloud", provider: "OpenAI", cloud: true },
+    { name: "claude-3.7-sonnet:cloud", provider: "Anthropic", cloud: true },
+    { name: "gemini-1.5-pro:cloud", provider: "Google", cloud: true },
+    { name: "qwen3.5:cloud", provider: "Cloud", cloud: true },
+    { name: "kimi-k2.6:cloud", provider: "Cloud", cloud: true }
+  ];
+
+  try {
+    const response = await axios.get(OLLAMA_TAGS_URL);
+    const localModels = (response.data.models || []).map((model) => ({
+      ...model,
+      provider: "Ollama",
+      cloud: false
+    }));
+    res.json({ models: [...localModels, ...cloudModels] });
   } catch (error) {
     res.json({
       models: [
-        { name: "llama2" },
-        { name: "mistral" },
-        { name: "neural-chat" }
+        { name: "llama3:latest", provider: "Ollama", cloud: false },
+        { name: "mistral", provider: "Ollama", cloud: false },
+        { name: "neural-chat", provider: "Ollama", cloud: false },
+        ...cloudModels
       ]
     });
   }
+});
+
+app.post("/ai/actions", async (req, res) => {
+  const { actions = [], workspacePath, profileId } = req.body;
+  const results = [];
+
+  for (const action of actions) {
+    try {
+      if (action.type === "writeFile") {
+        const targetPath = resolvePathInsideWorkspace(workspacePath, action.path);
+        const dir = path.dirname(targetPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(targetPath, action.content || "", "utf-8");
+        results.push({ type: action.type, ok: true, path: targetPath });
+      } else if (action.type === "readFile") {
+        const targetPath = resolvePathInsideWorkspace(workspacePath, action.path);
+        const content = fs.readFileSync(targetPath, "utf-8");
+        results.push({ type: action.type, ok: true, path: targetPath, content });
+      } else if (action.type === "runCommand") {
+        const profiles = await getAvailableTerminalProfiles();
+        const profile = profiles.find((item) => item.id === profileId) || profiles[0];
+        const workingDirectory = resolveWorkspacePath(workspacePath) || process.cwd();
+        const command = action.command || "";
+
+        const output = await new Promise((resolve) => {
+          execFile(
+            profile.command,
+            [...profile.args, command],
+            {
+              cwd: workingDirectory,
+              windowsHide: true,
+              maxBuffer: 1024 * 1024 * 10,
+              timeout: 120000
+            },
+            (error, stdout, stderr) => resolve({
+              type: action.type,
+              ok: !error,
+              command,
+              stdout,
+              stderr,
+              exitCode: typeof error?.code === "number" ? error.code : 0,
+              error: error && !stdout && !stderr ? error.message : ""
+            })
+          );
+        });
+        results.push(output);
+      }
+    } catch (error) {
+      results.push({
+        type: action.type,
+        ok: false,
+        path: action.path,
+        command: action.command,
+        error: error.message
+      });
+    }
+  }
+
+  res.json({ results });
 });
 
 app.get("/terminal/profiles", async (req, res) => {
