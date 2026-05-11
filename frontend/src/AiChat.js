@@ -27,8 +27,8 @@ const DEFAULT_SESSION = () => ({
   ]
 });
 
-const fastModels = ["orca-mini", "mistral", "neural-chat", "llama3:latest", "llama2"];
-const qualityModels = ["gpt-4.1-mini:cloud", "llama3:latest", "mistral", "neural-chat", "llama2"];
+const fastModels = ["deepseek-r1:1.5b", "orca-mini", "mistral", "neural-chat", "llama3:latest", "llama2"];
+const qualityModels = ["deepseek-r1:1.5b", "gpt-4.1-mini:cloud", "llama3:latest", "mistral", "neural-chat", "llama2"];
 
 const buildSystemPrompt = (workspacePath) => `You are ANAI, a coding AI assistant inside a VS Code-like IDE.
 The owner and creator of this AI is anointedthedeveloper. If asked who owns or created you, answer: anointedthedeveloper.
@@ -99,13 +99,25 @@ const stripActionBlocks = (text) => {
 };
 
 const extractThinking = (text) => {
+  // Handle split tags across chunks by tracking partial matches
+  const thinkOpen = /<think>/i;
+  const thinkClose = /<\/think>/i;
+  
+  // Find complete thinking blocks
   const closed = text.match(/<think>([\s\S]*?)<\/think>/i);
   if (closed?.[1]) return closed[1].trim();
 
-  const open = text.match(/<think>([\s\S]*)$/i);
-  if (open?.[1]) return open[1].trim();
+  // Find open thinking blocks (no closing tag yet)
+  const openMatch = text.match(/<think>([\s\S]*)$/i);
+  if (openMatch?.[1]) return openMatch[1].trim();
 
   return "";
+};
+
+const isInThinkingBlock = (text) => {
+  const openCount = (text.match(/<think>/gi) || []).length;
+  const closeCount = (text.match(/<\/think>/gi) || []).length;
+  return openCount > closeCount;
 };
 
 const cleanAssistantText = (text) => {
@@ -113,12 +125,6 @@ const cleanAssistantText = (text) => {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/gi, "")
     .trim();
-};
-
-const hasOpenThinking = (text) => {
-  const openCount = (text.match(/<think>/gi) || []).length;
-  const closeCount = (text.match(/<\/think>/gi) || []).length;
-  return openCount > closeCount;
 };
 
 const flattenTree = (items = [], depth = 0, limit = 80, lines = []) => {
@@ -175,6 +181,8 @@ function AiChat({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [thinkingText, setThinkingText] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const [currentStreamingModel, setCurrentStreamingModel] = useState("");
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [modePreference, setModePreference] = useState("fast");
@@ -342,19 +350,15 @@ function AiChat({
     appendMessage({ role: "assistant", content: "", pending: true, model: modelToUse });
     setInput("");
     setLoading(true);
-    setThinkingText("Thinking through the workspace...");
+    setCurrentStreamingModel(modelToUse);
+    setThinkingText("");
+    setIsThinking(false);
 
     const controller = new AbortController();
     abortRef.current = controller;
     let finalText = "";
     let buffer = "";
-    const thinkingTimer = window.setInterval(() => {
-      setThinkingText((prev) => {
-        if (prev.includes("Checking files")) return "Preparing response...";
-        if (prev.includes("workspace")) return "Checking files, commands, and context...";
-        return "Thinking through the workspace...";
-      });
-    }, 1400);
+    let accumulatedThinking = "";
 
     try {
       let workspaceSummary = "No workspace folder is open.";
@@ -375,7 +379,7 @@ function AiChat({
         body: JSON.stringify({
           model: modelToUse,
           prompt: `${buildSystemPrompt(workspacePath)}\n\nWorkspace file tree:\n${workspaceSummary}\n\nConversation:\n${historyContext}\n\nUser: ${promptText}${modelNotice}\nAssistant:`,
-          stream: true,
+          stream: true, // Ensure streaming is enabled
           temperature: modePreference === "fast" ? 0.05 : 0.25,
           max_tokens: modePreference === "fast" ? 384 : 768,
           num_ctx: 3072,
@@ -394,24 +398,48 @@ function AiChat({
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value || new Uint8Array(), { stream: true });
+        
+        const chunk = decoder.decode(value || new Uint8Array(), { stream: true });
+        console.log("RAW CHUNK:", chunk); // Debug: Log raw data from Ollama
+        
+        buffer += chunk;
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          console.log("PARSING LINE:", line); // Debug: Log each JSON line
           try {
             const json = JSON.parse(line);
             if (json.response) {
               finalText += json.response;
               const currentText = finalText;
-              const thinking = extractThinking(currentText);
-              setThinkingText(thinking ? thinking.slice(0, 140) : "");
-              if (!hasOpenThinking(currentText)) {
-                patchLastAssistant((msg) => ({ ...msg, content: cleanAssistantText(currentText), model: modelToUse }));
+              console.log("CURRENT TEXT:", currentText); // Debug: Log accumulated text
+              
+              // Check if we're in a thinking block
+              const currentlyThinking = isInThinkingBlock(currentText);
+              if (currentlyThinking !== isThinking) {
+                console.log("THINKING STATE CHANGED:", currentlyThinking); // Debug: Log state changes
+                setIsThinking(currentlyThinking);
+              }
+              
+              // Extract thinking content if in thinking block
+              if (currentlyThinking) {
+                const thinking = extractThinking(currentText);
+                if (thinking && thinking !== accumulatedThinking) {
+                  accumulatedThinking = thinking;
+                  console.log("THINKING CONTENT:", thinking); // Debug: Log thinking content
+                  setThinkingText(thinking);
+                }
+              } else {
+                // Not thinking anymore, show the cleaned response
+                const cleanedText = cleanAssistantText(currentText);
+                console.log("FINAL ANSWER:", cleanedText); // Debug: Log final answer
+                patchLastAssistant((msg) => ({ ...msg, content: cleanedText, model: modelToUse }));
               }
             }
-          } catch {
+          } catch (error) {
+            console.log("JSON PARSE ERROR:", error, "LINE:", line); // Debug: Log parse errors
             // Wait for the next stream chunk if Ollama splits a JSON line.
           }
         }
@@ -446,8 +474,9 @@ function AiChat({
         }));
       }
     } finally {
-      window.clearInterval(thinkingTimer);
       setThinkingText("");
+      setIsThinking(false);
+      setCurrentStreamingModel("");
       setLoading(false);
       abortRef.current = null;
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -488,6 +517,12 @@ function AiChat({
           <div className="chat-title-section">
             <h3 className="chat-title">ANAI</h3>
             <p className="chat-subtitle">Owner: anointedthedeveloper</p>
+            {currentStreamingModel && (
+              <div className="current-model-indicator">
+                <VscCircleFilled className="model-indicator-icon" />
+                <span>Model: {currentStreamingModel}</span>
+              </div>
+            )}
             <div className="model-status"><VscCircleFilled /> {modelSummary}</div>
           </div>
           <button className="clear-btn" onClick={fetchModels} title="Refresh models"><VscSync /></button>
@@ -511,7 +546,12 @@ function AiChat({
         <div className="messages-container">
           {visibleMessages.map((msg, idx) => (
             <div key={idx} className={`message message-${msg.role} ${msg.error ? "error" : ""} ${msg.pending ? "message-pending" : ""}`}>
-              <div className="message-role">{msg.role === "user" ? "You" : "ANAI"}</div>
+              <div className="message-role">
+                {msg.role === "user" ? "You" : "ANAI"}
+                {msg.model && msg.role === "assistant" && (
+                  <span className="message-model-badge">{msg.model}</span>
+                )}
+              </div>
               <div className="message-content">{renderMessageContent(msg.content)}</div>
               {msg.pending && !msg.content && (
                 <div className="loader-row"><span /><span /><span /> {thinkingText || "Waiting for model..."}</div>
@@ -523,8 +563,16 @@ function AiChat({
               </div>
             </div>
           ))}
-          {loading && thinkingText && (
-            <div className="thinking-strip">{thinkingText}</div>
+          {isThinking && thinkingText && (
+            <div className="thinking-container">
+              <div className="thinking-header">
+                <VscCircleFilled className="thinking-icon" />
+                <span>Thinking...</span>
+              </div>
+              <div className="thinking-content">
+                {renderMessageContent(thinkingText)}
+              </div>
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
