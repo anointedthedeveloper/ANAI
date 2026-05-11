@@ -15,12 +15,17 @@ import {
   VscSearch,
   VscSettings,
   VscSync,
-  VscTerminal
+  VscTerminal,
+  VscCode
 } from "react-icons/vsc";
 import AiChat from "./AiChat";
+import EnhancedCodeEditor from "./EnhancedCodeEditor";
+import VSCodeEmbed from "./VSCodeEmbed";
+import ExtensionMarketplace from "./ExtensionMarketplace";
+import LSPIntegration from "./LSPIntegration";
 import "./App.css";
 
-const CodeEditor = lazy(() => import("./CodeEditor"));
+const CodeEditor = lazy(() => import("./EnhancedCodeEditor"));
 
 function App() {
   const [activeActivity, setActiveActivity] = useState("explorer");
@@ -38,11 +43,17 @@ function App() {
   const [showExplorer, setShowExplorer] = useState(true);
   const [showChat, setShowChat] = useState(true);
   const [showTerminal, setShowTerminal] = useState(true);
+  const [showVSCodeEmbed, setShowVSCodeEmbed] = useState(false);
+  const [showExtensionMarketplace, setShowExtensionMarketplace] = useState(false);
+  const [showLSPIntegration, setShowLSPIntegration] = useState(false);
+  const [installedExtensions, setInstalledExtensions] = useState([]);
   const [repoUrl, setRepoUrl] = useState("");
   const [repoToken, setRepoToken] = useState("");
   const [repoList, setRepoList] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [repoCloneStatus, setRepoCloneStatus] = useState("");
+  const [liveServerRunning, setLiveServerRunning] = useState(false);
+  const [liveServerPort, setLiveServerPort] = useState(3000);
   const terminalRef = useRef(null);
   const terminalInputRef = useRef(null);
   const editorRef = useRef(null);
@@ -321,6 +332,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event) => {
+      if (!event || !event.key) return; // Fix: Check if event and key exist
       const key = event.key.toLowerCase();
       const mod = event.ctrlKey || event.metaKey;
 
@@ -393,8 +405,12 @@ function App() {
     : activeActivity === "search"
       ? "Search"
       : activeActivity === "extensions"
-        ? "Extensions"
-        : "Explorer";
+        ? "Extension Marketplace"
+        : activeActivity === "vscode"
+          ? "VS Code Embed"
+          : activeActivity === "lsp"
+            ? "Language Servers"
+            : "Explorer";
 
   return (
     <div className="ide-container">
@@ -419,6 +435,9 @@ function App() {
           <button onClick={() => setShowExplorer((value) => !value)} title="Toggle Explorer (Ctrl+B)">Explorer</button>
           <button onClick={() => setShowTerminal((value) => !value)} title="Toggle Terminal (Ctrl+`)">Terminal</button>
           <button onClick={() => setShowChat((value) => !value)} title="Toggle Chat (Ctrl+Shift+A)">Chat</button>
+          <button onClick={() => setShowVSCodeEmbed((value) => !value)} title="Toggle VS Code Embed">VS Code</button>
+          <button onClick={() => setShowExtensionMarketplace((value) => !value)} title="Toggle Extensions">Extensions</button>
+          <button onClick={() => setShowLSPIntegration((value) => !value)} title="Toggle LSP">LSP</button>
         </div>
       </header>
 
@@ -427,6 +446,8 @@ function App() {
           <button className={`activity-item ${activeActivity === "explorer" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("explorer"); setShowExplorer(true); }} title="Explorer"><VscFolderOpened /></button>
           <button className={`activity-item ${activeActivity === "search" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("search"); setShowExplorer(true); }} title="Search"><VscSearch /></button>
           <button className={`activity-item ${activeActivity === "extensions" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("extensions"); setShowExplorer(true); }} title="Extensions"><VscExtensions /></button>
+          <button className={`activity-item ${activeActivity === "vscode" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("vscode"); setShowExplorer(true); }} title="VS Code Embed"><VscCode /></button>
+          <button className={`activity-item ${activeActivity === "lsp" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("lsp"); setShowExplorer(true); }} title="Language Servers"><VscSettings /></button>
           <button className={`activity-item ${activeActivity === "settings" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("settings"); setShowExplorer(true); }} title="Repo & Settings"><VscSettings /></button>
         </nav>
 
@@ -463,10 +484,41 @@ function App() {
                   ))}
                 </div>
               </div>
+            ) : activeActivity === "extensions" ? (
+              <ExtensionMarketplace 
+                onInstallExtension={(extension) => {
+                  setInstalledExtensions(prev => [...prev, extension]);
+                  console.log('Installed extension:', extension.name);
+                }}
+                installedExtensions={installedExtensions}
+              />
+            ) : activeActivity === "vscode" ? (
+              <VSCodeEmbed 
+                file={activeFile ? { name: activeFile.split('/').pop(), content: fileContent } : null}
+                onClose={() => setShowVSCodeEmbed(false)}
+                onFileChange={(content, language) => {
+                  setFileContent(content);
+                }}
+              />
+            ) : activeActivity === "lsp" ? (
+              <LSPIntegration
+                activeFile={activeFile ? { name: activeFile.split('/').pop(), content: fileContent } : null}
+                onDiagnostics={(diagnostics) => {
+                  console.log('LSP diagnostics:', diagnostics);
+                  // Handle diagnostics in UI
+                }}
+                onCompletion={(completions) => {
+                  console.log('LSP completions:', completions);
+                  // Handle completions in UI
+                }}
+                onHover={(hoverInfo) => {
+                  console.log('LSP hover:', hoverInfo);
+                  // Handle hover in UI
+                }}
+                workspacePath={selectedRepo?.path || currentPath}
+              />
             ) : activeActivity === "search" ? (
               <div className="panel-empty">Search support will be added soon.</div>
-            ) : activeActivity === "extensions" ? (
-              <div className="panel-empty">Extensions panel is not yet available.</div>
             ) : !selectedRepo?.path ? (
               <div className="empty-workspace">
                 <div className="empty-workspace-title">No folder open</div>
@@ -483,7 +535,7 @@ function App() {
 
           <Panel minSize={36} defaultSize={58} className="center-panel">
             <PanelGroup direction="vertical">
-              <Panel defaultSize={68} minSize={35} className="editor-panel">
+              <Panel defaultSize={68} minSize={35} className="center-panel">
                 <div className="editor-toolbar">
                   <div className="editor-path">{activeFile || "No file open"}</div>
                   <div className="editor-actions">
@@ -491,6 +543,12 @@ function App() {
                     <button className="save-button" onClick={() => editorRef.current?.redo()} disabled={!activeFile} title="Redo (Ctrl+Y)">Redo</button>
                     <button className="save-button" onClick={saveFile} disabled={!activeFile} title="Save file (Ctrl+S)">
                       <VscSave /> Save
+                    </button>
+                    <button className="save-button" onClick={() => editorRef.current?.formatDocument?.()} disabled={!activeFile} title="Format Document">
+                      ⚡ Format
+                    </button>
+                    <button className="save-button" onClick={() => editorRef.current?.toggleExtensions?.()} disabled={!activeFile} title="Toggle Extensions">
+                      <VscExtensions /> Extensions
                     </button>
                   </div>
                 </div>

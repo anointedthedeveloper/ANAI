@@ -1,0 +1,281 @@
+.marketplace-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+.marketplace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  gap: 16px;
+}
+
+.marketplace-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #cccccc;
+}
+
+.marketplace-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.marketplace-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.search-container {
+  display: flex;
+  align-items: center;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  padding: 6px 12px;
+  min-width: 300px;
+}
+
+.search-icon {
+  color: #8c8c8c;
+  margin-right: 8px;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #cccccc;
+  font-size: 14px;
+  outline: none;
+}
+
+.filter-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-select {
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  color: #cccccc;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.extensions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.extension-card {
+  display: flex;
+  flex-direction: column;
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.extension-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.extension-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.extension-icon-large {
+  font-size: 32px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2d2d30;
+  border-radius: 6px;
+}
+
+.extension-info {
+  flex: 1;
+}
+
+.extension-name {
+  margin: 0 0 4px 0;
+  color: #cccccc;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.extension-author {
+  margin: 0 0 8px 0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.extension-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extension-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.extension-downloads,
+.extension-rating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.extension-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.extension-tag {
+  background: #3c3c3c;
+  color: #cccccc;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
+.extension-description {
+  padding: 12px 16px;
+  color: #d4d4d4;
+  font-size: 13px;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.extension-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #2d2d30;
+  border-top: 1px solid #3e3e42;
+}
+
+.extension-compatibility {
+  display: flex;
+  gap: 8px;
+}
+
+.compatibility-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.compatibility-badge.compatible {
+  background: #4caf50;
+  color: white;
+}
+
+.compatibility-badge.incompatible {
+  background: #ff9800;
+  color: white;
+}
+
+.extension-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.extension-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  background: #3c3c3c;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.extension-btn:hover:not(:disabled) {
+  background: #4a4a4a;
+  border-color: #007acc;
+  color: white;
+}
+
+.extension-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.extension-btn.install {
+  background: #007acc;
+  border-color: #007acc;
+  color: white;
+}
+
+.extension-btn.install:hover:not(:disabled) {
+  background: #005a9e;
+}
+
+.extension-btn.installed {
+  background: #4caf50;
+  border-color: #4caf50;
+  color: white;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .marketplace-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .marketplace-controls {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .search-container {
+    min-width: auto;
+  }
+  
+  .extensions-grid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+}

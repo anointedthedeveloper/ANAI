@@ -1,0 +1,272 @@
+.enhanced-editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #2d2d30;
+  border-bottom: 1px solid #3e3e42;
+  min-height: 40px;
+  gap: 12px;
+}
+
+.editor-language {
+  display: flex;
+  align-items: center;
+}
+
+.language-badge {
+  background: #007acc;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  background: #3c3c3c;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.toolbar-btn:hover,
+.toolbar-btn.active {
+  background: #4a4a4a;
+  border-color: #007acc;
+  color: white;
+}
+
+.editor-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.extensions-panel {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  width: 320px;
+  height: calc(100% - 40px);
+  background: #252526;
+  border-left: 1px solid #3e3e42;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.extensions-panel.visible {
+  transform: translateX(0);
+}
+
+.extensions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3e3e42;
+  background: #2d2d30;
+}
+
+.extensions-header h4 {
+  margin: 0;
+  color: #cccccc;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.extensions-close {
+  background: none;
+  border: none;
+  color: #cccccc;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.extensions-close:hover {
+  color: white;
+}
+
+.extensions-list {
+  padding: 12px;
+}
+
+.extension-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  background: #2d2d30;
+  margin-bottom: 8px;
+}
+
+.extension-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.extension-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extension-icon {
+  font-size: 18px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.extension-details {
+  flex: 1;
+}
+
+.extension-name {
+  color: #cccccc;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.extension-description {
+  color: #8c8c8c;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.extension-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.extension-category {
+  background: #3c3c3c;
+  color: #cccccc;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.extension-category.formatters {
+  background: #4caf50;
+}
+
+.extension-category.linters {
+  background: #ff9800;
+}
+
+.extension-category.visual {
+  background: #2196f3;
+}
+
+.extension-category.git {
+  background: #f44336;
+}
+
+.extension-category.intellisense {
+  background: #9c27b0;
+}
+
+.extension-warning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #ff9800;
+  font-size: 10px;
+}
+
+.extension-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.extension-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  background: #3c3c3c;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.extension-toggle.enabled {
+  background: #4caf50;
+  border-color: #4caf50;
+  color: white;
+}
+
+.extension-toggle.disabled {
+  background: #3c3c3c;
+  color: #666666;
+  cursor: not-allowed;
+}
+
+.monaco-editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Extension animations */
+.extension-item {
+  animation: slideInRight 0.3s ease;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

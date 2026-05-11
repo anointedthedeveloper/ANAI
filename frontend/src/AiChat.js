@@ -186,6 +186,7 @@ function AiChat({
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [modePreference, setModePreference] = useState("fast");
+  const [streamUpdateTimer, setStreamUpdateTimer] = useState(null);
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -414,29 +415,39 @@ function AiChat({
             if (json.response) {
               finalText += json.response;
               const currentText = finalText;
-              console.log("CURRENT TEXT:", currentText); // Debug: Log accumulated text
               
-              // Check if we're in a thinking block
-              const currentlyThinking = isInThinkingBlock(currentText);
-              if (currentlyThinking !== isThinking) {
-                console.log("THINKING STATE CHANGED:", currentlyThinking); // Debug: Log state changes
-                setIsThinking(currentlyThinking);
+              // Debounce UI updates for smoother streaming
+              if (streamUpdateTimer) {
+                clearTimeout(streamUpdateTimer);
               }
               
-              // Extract thinking content if in thinking block
-              if (currentlyThinking) {
-                const thinking = extractThinking(currentText);
-                if (thinking && thinking !== accumulatedThinking) {
-                  accumulatedThinking = thinking;
-                  console.log("THINKING CONTENT:", thinking); // Debug: Log thinking content
-                  setThinkingText(thinking);
+              const timer = setTimeout(() => {
+                console.log("CURRENT TEXT:", currentText); // Debug: Log accumulated text
+                
+                // Check if we're in a thinking block
+                const currentlyThinking = isInThinkingBlock(currentText);
+                if (currentlyThinking !== isThinking) {
+                  console.log("THINKING STATE CHANGED:", currentlyThinking); // Debug: Log state changes
+                  setIsThinking(currentlyThinking);
                 }
-              } else {
-                // Not thinking anymore, show the cleaned response
-                const cleanedText = cleanAssistantText(currentText);
-                console.log("FINAL ANSWER:", cleanedText); // Debug: Log final answer
-                patchLastAssistant((msg) => ({ ...msg, content: cleanedText, model: modelToUse }));
-              }
+                
+                // Extract thinking content if in thinking block
+                if (currentlyThinking) {
+                  const thinking = extractThinking(currentText);
+                  if (thinking && thinking !== accumulatedThinking) {
+                    accumulatedThinking = thinking;
+                    console.log("THINKING CONTENT:", thinking); // Debug: Log thinking content
+                    setThinkingText(thinking);
+                  }
+                } else {
+                  // Not thinking anymore, show cleaned response
+                  const cleanedText = cleanAssistantText(currentText);
+                  console.log("FINAL ANSWER:", cleanedText); // Debug: Log final answer
+                  patchLastAssistant((msg) => ({ ...msg, content: cleanedText, model: modelToUse }));
+                }
+              }, 50); // Debounce with 50ms delay for smoother updates
+              
+              setStreamUpdateTimer(timer);
             }
           } catch (error) {
             console.log("JSON PARSE ERROR:", error, "LINE:", line); // Debug: Log parse errors
@@ -474,6 +485,10 @@ function AiChat({
         }));
       }
     } finally {
+      if (streamUpdateTimer) {
+        clearTimeout(streamUpdateTimer);
+        setStreamUpdateTimer(null);
+      }
       setThinkingText("");
       setIsThinking(false);
       setCurrentStreamingModel("");
