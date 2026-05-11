@@ -24,7 +24,6 @@ import {
   VscFilePdf,
   VscFileZip,
   VscFileMedia,
-  VscFileImage,
   VscFileBinary,
   VscJson,
   VscGist,
@@ -59,7 +58,9 @@ import {
   VscSymbolNull,
   VscSymbolEnumMember,
   VscSymbolOperator,
-  VscSymbolStruct
+  VscSymbolStruct,
+  VscColorMode,
+  VscCloudDownload
 } from "react-icons/vsc";
 import AiChat from "./AiChat";
 import EnhancedCodeEditor from "./EnhancedCodeEditor";
@@ -71,6 +72,7 @@ import "./App.css";
 const CodeEditor = lazy(() => import("./EnhancedCodeEditor"));
 
 function App() {
+  const [theme, setTheme] = useState(() => localStorage.getItem("anai.theme") || "dark");
   const [activeActivity, setActiveActivity] = useState("explorer");
   const [files, setFiles] = useState([]);
   const [currentPath, setCurrentPath] = useState("");
@@ -112,6 +114,95 @@ function App() {
   const terminalRef = useRef(null);
   const terminalInputRef = useRef(null);
   const editorRef = useRef(null);
+
+  // Apply theme changes
+  useEffect(() => {
+    localStorage.setItem("anai.theme", theme);
+    const htmlElement = document.documentElement;
+    if (theme === "light") {
+      htmlElement.classList.add("light-theme");
+    } else {
+      htmlElement.classList.remove("light-theme");
+    }
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prevTheme) => (prevTheme === "dark" ? "light" : "dark"));
+  }, []);
+
+  const downloadExtension = useCallback(async () => {
+    // Create a simple VS Code extension package
+    const extensionManifest = {
+      name: "anai-extension",
+      displayName: "ANAI Extension",
+      description: "AI-powered development workspace extension for VS Code",
+      version: "1.0.0",
+      publisher: "anai",
+      engines: {
+        vscode: "^1.80.0"
+      },
+      main: "./out/extension.js",
+      contributes: {
+        commands: [
+          {
+            command: "anai.openWorkspace",
+            title: "Open ANAI Workspace"
+          },
+          {
+            command: "anai.runAIChat",
+            title: "Run AI Chat"
+          }
+        ]
+      }
+    };
+
+    // Create a minimal extension.js
+    const extensionCode = `
+const vscode = require('vscode');
+
+function activate(context) {
+  console.log('ANAI Extension is now active!');
+  
+  let disposable = vscode.commands.registerCommand('anai.openWorkspace', () => {
+    vscode.window.showInformationMessage('ANAI Workspace opened!');
+  });
+  
+  context.subscriptions.push(disposable);
+}
+
+function deactivate() {}
+
+module.exports = {
+  activate,
+  deactivate
+};
+`;
+
+    // Create a package.json for the extension
+    const packageJson = JSON.stringify(extensionManifest, null, 2);
+
+    // Create and download the extension files
+    const blob = new Blob([packageJson], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "package.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    // Also download extension.js
+    const codeBlob = new Blob([extensionCode], { type: "text/javascript" });
+    const codeUrl = URL.createObjectURL(codeBlob);
+    const codeLink = document.createElement("a");
+    codeLink.href = codeUrl;
+    codeLink.download = "extension.js";
+    document.body.appendChild(codeLink);
+    codeLink.click();
+    document.body.removeChild(codeLink);
+    URL.revokeObjectURL(codeUrl);
+  }, []);
 
   const getLanguageFromFileName = (fileName) => {
     const extension = fileName.split(".").pop().toLowerCase();
@@ -191,14 +282,14 @@ function App() {
       rtf: <VscFile />,
       
       // Images
-      png: <VscFileImage />,
-      jpg: <VscFileImage />,
-      jpeg: <VscFileImage />,
-      gif: <VscFileImage />,
-      svg: <VscFileImage />,
-      ico: <VscFileImage />,
-      bmp: <VscFileImage />,
-      webp: <VscFileImage />,
+      png: <VscFile />,
+      jpg: <VscFile />,
+      jpeg: <VscFile />,
+      gif: <VscFile />,
+      svg: <VscFile />,
+      ico: <VscFile />,
+      bmp: <VscFile />,
+      webp: <VscFile />,
       
       // Media
       mp4: <VscFileMedia />,
@@ -751,6 +842,12 @@ function App() {
           <button onClick={() => setShowVSCodeEmbed((value) => !value)} title="Toggle VS Code Embed">VS Code</button>
           <button onClick={() => setShowExtensionMarketplace((value) => !value)} title="Toggle Extensions">Extensions</button>
           <button onClick={() => setShowLSPIntegration((value) => !value)} title="Toggle LSP">LSP</button>
+          <button onClick={toggleTheme} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+            <VscColorMode className="header-icon" /> {theme === "dark" ? "Light" : "Dark"}
+          </button>
+          <button onClick={downloadExtension} title="Download ANAI Extension">
+            <VscCloudDownload className="header-icon" /> Download Extension
+          </button>
         </div>
       </header>
 
