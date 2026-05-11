@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspens
 import axios from "axios";
 import * as path from "path-browserify";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import MarketplaceService from "./services/MarketplaceService";
+import FileSystemService from "./services/FileSystemService";
 import {
   VscChromeClose,
   VscExtensions,
@@ -16,7 +18,8 @@ import {
   VscSettings,
   VscSync,
   VscTerminal,
-  VscCode
+  VscCode,
+  VscPlay
 } from "react-icons/vsc";
 import AiChat from "./AiChat";
 import EnhancedCodeEditor from "./EnhancedCodeEditor";
@@ -54,6 +57,11 @@ function App() {
   const [repoCloneStatus, setRepoCloneStatus] = useState("");
   const [liveServerRunning, setLiveServerRunning] = useState(false);
   const [liveServerPort, setLiveServerPort] = useState(3000);
+  const [marketplaceService] = useState(() => new MarketplaceService());
+  const [fileSystemService] = useState(() => new FileSystemService());
+  const [marketplaceExtensions, setMarketplaceExtensions] = useState([]);
+  const [loadingExtensions, setLoadingExtensions] = useState(false);
+  const [useOpenVSX, setUseOpenVSX] = useState(false);
   const terminalRef = useRef(null);
   const terminalInputRef = useRef(null);
   const editorRef = useRef(null);
@@ -138,16 +146,53 @@ function App() {
 
   const openFolder = useCallback(async () => {
     try {
-      const res = await axios.post("http://localhost:3001/workspace/select-folder");
-      if (res.data.cancelled) return;
+      // Try modern File System Access API first
+      if (fileSystemService.isSupported()) {
+        const folderHandle = await fileSystemService.openFolder();
+        
+        // Create workspace object from modern API
+        const workspace = {
+          name: folderHandle.name,
+          path: folderHandle.path,
+          handle: folderHandle.handle,
+          isModernAPI: true
+        };
+        
+        setSelectedRepo(workspace);
+        setActiveActivity("explorer");
+        
+        // Load files using modern API if available, otherwise fallback to backend
+        if (folderHandle.isModernAPI) {
+          try {
+            const fileTree = await fileSystemService.getFileTree(folderHandle.handle);
+            setFiles(fileTree);
+            setCurrentPath(folderHandle.path);
+          } catch (fileSystemError) {
+            console.warn('Modern file system failed, falling back to backend:', fileSystemError);
+            await loadFiles(folderHandle.path);
+          }
+        } else {
+          await loadFiles(folderHandle.path);
+        }
+        
+        // Store path for persistence (note: modern API doesn't expose full paths)
+        localStorage.setItem("anai.workspacePath", folderHandle.path);
+      } else {
+        // Fallback to backend method
+        const res = await axios.post("http://localhost:3001/workspace/select-folder");
+        if (res.data.cancelled) return;
 
-      const workspace = res.data;
-      setSelectedRepo(workspace);
-      setActiveActivity("explorer");
-      localStorage.setItem("anai.workspacePath", workspace.path);
-      await loadFiles(workspace.path);
+        const workspace = res.data;
+        setSelectedRepo(workspace);
+        setActiveActivity("explorer");
+        localStorage.setItem("anai.workspacePath", workspace.path);
+        await loadFiles(workspace.path);
+      }
     } catch (error) {
-      const enteredPath = window.prompt("Could not open the Windows folder picker. Enter the full folder path to open in ANAI:");
+      console.error('Error opening folder:', error);
+      
+      // Final fallback to manual path entry
+      const enteredPath = window.prompt("Could not open folder. Enter the full folder path to open in ANAI:");
       if (!enteredPath?.trim()) return;
 
       try {
@@ -163,7 +208,7 @@ function App() {
         window.alert(fallbackError.response?.data?.error || fallbackError.message);
       }
     }
-  }, [loadFiles]);
+  }, [loadFiles, fileSystemService]);
 
   useEffect(() => {
     fetchRepositories();
@@ -330,6 +375,42 @@ function App() {
     await runTerminalCommand(terminalInput);
   }, [runTerminalCommand, terminalInput]);
 
+  const toggleLiveServer = async () => {
+    if (liveServerRunning) {
+      // Stop live server
+      try {
+        await axios.post("http://localhost:3001/terminal/run", {
+          command: `pkill -f "live-server --port=${liveServerPort}"`,
+          profileId: activeTerminalProfile,
+          cwd: selectedRepo?.path || currentPath
+        });
+        setLiveServerRunning(false);
+        setTerminalOutput(prev => [...prev, `Live Server stopped on port ${liveServerPort}`]);
+      } catch (error) {
+        console.error('Error stopping live server:', error);
+      }
+    } else {
+      // Start live server
+      try {
+        setTerminalOutput(prev => [...prev, `Starting Live Server on port ${liveServerPort}...`]);
+        await axios.post("http://localhost:3001/terminal/run", {
+          command: `npx live-server --port=${liveServerPort} --open=/index.html`,
+          profileId: activeTerminalProfile,
+          cwd: selectedRepo?.path || currentPath
+        });
+        setLiveServerRunning(true);
+        setTerminalOutput(prev => [...prev, `Live Server started on http://localhost:${liveServerPort}`]);
+      } catch (error) {
+        console.error('Error starting live server:', error);
+        setTerminalOutput(prev => [...prev, `Failed to start Live Server: ${error.message}`]);
+      }
+    }
+  };
+
+  const isExtensionInstalled = (extensionId) => {
+    return installedExtensions.some(ext => ext.id === extensionId);
+  };
+
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!event || !event.key) return; // Fix: Check if event and key exist
@@ -443,12 +524,54 @@ function App() {
 
       <div className="workspace-shell">
         <nav className="activity-bar">
-          <button className={`activity-item ${activeActivity === "explorer" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("explorer"); setShowExplorer(true); }} title="Explorer"><VscFolderOpened /></button>
-          <button className={`activity-item ${activeActivity === "search" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("search"); setShowExplorer(true); }} title="Search"><VscSearch /></button>
-          <button className={`activity-item ${activeActivity === "extensions" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("extensions"); setShowExplorer(true); }} title="Extensions"><VscExtensions /></button>
-          <button className={`activity-item ${activeActivity === "vscode" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("vscode"); setShowExplorer(true); }} title="VS Code Embed"><VscCode /></button>
-          <button className={`activity-item ${activeActivity === "lsp" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("lsp"); setShowExplorer(true); }} title="Language Servers"><VscSettings /></button>
-          <button className={`activity-item ${activeActivity === "settings" && showExplorer ? "active" : ""}`} onClick={() => { setActiveActivity("settings"); setShowExplorer(true); }} title="Repo & Settings"><VscSettings /></button>
+          <button className={`activity-item ${activeActivity === "explorer" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "explorer" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("explorer"); 
+              setShowExplorer(true); 
+            }
+          }} title="Explorer"><VscFolderOpened /></button>
+          <button className={`activity-item ${activeActivity === "search" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "search" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("search"); 
+              setShowExplorer(true); 
+            }
+          }} title="Search"><VscSearch /></button>
+          <button className={`activity-item ${activeActivity === "extensions" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "extensions" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("extensions"); 
+              setShowExplorer(true); 
+            }
+          }} title="Extensions"><VscExtensions /></button>
+          <button className={`activity-item ${activeActivity === "vscode" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "vscode" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("vscode"); 
+              setShowExplorer(true); 
+            }
+          }} title="VS Code Embed"><VscCode /></button>
+          <button className={`activity-item ${activeActivity === "lsp" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "lsp" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("lsp"); 
+              setShowExplorer(true); 
+            }
+          }} title="Language Servers"><VscSettings /></button>
+          <button className={`activity-item ${activeActivity === "settings" && showExplorer ? "active" : ""}`} onClick={() => { 
+            if (activeActivity === "settings" && showExplorer) {
+              setShowExplorer(false);
+            } else {
+              setActiveActivity("settings"); 
+              setShowExplorer(true); 
+            }
+          }} title="Repo & Settings"><VscSettings /></button>
         </nav>
 
         <PanelGroup direction="horizontal" className="panel-workspace">
@@ -636,6 +759,18 @@ function App() {
           <span>{selectedRepo ? `Repo: ${selectedRepo.name}` : "Workspace"}</span>
         </div>
         <div className="status-right">
+          {/* Extension Controls */}
+          {isExtensionInstalled('live-server') && (
+            <button 
+              className={`extension-status-btn ${liveServerRunning ? 'running' : 'stopped'}`}
+              onClick={toggleLiveServer}
+              title={liveServerRunning ? 'Stop Live Server' : 'Start Live Server'}
+            >
+              <VscPlay />
+              Live Server {liveServerRunning ? `:${liveServerPort}` : ''}
+            </button>
+          )}
+          
           <span>Ctrl+B Explorer</span>
           <span>Ctrl+` Terminal</span>
           <span>Ctrl+Shift+A Chat</span>
