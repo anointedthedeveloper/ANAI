@@ -190,6 +190,7 @@ function AiChat({
   const abortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const workspaceCacheRef = useRef({ path: null, data: null, timestamp: 0 });
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0];
   const activeModel = models.find((model) => model.name === selectedModel);
@@ -234,7 +235,15 @@ function AiChat({
 
   const fetchModels = useCallback(async () => {
     try {
-      const response = await axios.get("http://localhost:3001/models");
+      // Use abort controller for request timeout (5 second timeout)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await axios.get("http://localhost:3001/models", {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
       const modelList = (response.data.models || []).map((model) => ({
         name: model.name,
         provider: model.provider || (model.cloud ? "Cloud" : "Ollama"),
@@ -365,14 +374,43 @@ function AiChat({
       let workspaceSummary = "No workspace folder is open.";
       if (workspacePath) {
         try {
-          const treeRes = await axios.get(`http://localhost:3001/files?path=${encodeURIComponent(workspacePath)}`);
-          workspaceSummary = flattenTree(treeRes.data.tree).join("\n") || "Workspace is empty.";
+          // Use cached workspace data if it's less than 30 seconds old
+          const now = Date.now();
+          if (workspaceCacheRef.current.path === workspacePath && 
+              now - workspaceCacheRef.current.timestamp < 30000) {
+            workspaceSummary = workspaceCacheRef.current.data;
+          } else {
+            // Use abort controller for request timeout (3 second timeout)
+            const cacheController = new AbortController();
+            const cacheTimeoutId = setTimeout(() => cacheController.abort(), 3000);
+            
+            const treeRes = await axios.get(`http://localhost:3001/files?path=${encodeURIComponent(workspacePath)}`, {
+              signal: cacheController.signal
+            });
+            clearTimeout(cacheTimeoutId);
+            
+            const treeData = flattenTree(treeRes.data.tree).join("\n") || "Workspace is empty.";
+            workspaceSummary = treeData;
+            
+            // Update cache
+            workspaceCacheRef.current = {
+              path: workspacePath,
+              data: treeData,
+              timestamp: now
+            };
+          }
         } catch {
-          workspaceSummary = "Workspace tree could not be loaded.";
+          // Use cached data even if request fails
+          if (workspaceCacheRef.current.path === workspacePath && workspaceCacheRef.current.data) {
+            workspaceSummary = workspaceCacheRef.current.data;
+          } else {
+            workspaceSummary = "Workspace tree could not be loaded.";
+          }
         }
       }
 
-      const historyContext = visibleMessages.slice(-8).map((msg) => `${msg.role}: ${msg.content}`).join("\n");
+      // Use only last 6 messages instead of 8 to reduce token usage and improve speed
+      const historyContext = visibleMessages.slice(-6).map((msg) => `${msg.role}: ${msg.content.slice(0, 500)}`).join("\n");
       const response = await fetch("http://localhost:11434/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
