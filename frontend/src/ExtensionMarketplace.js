@@ -137,7 +137,16 @@ const MARKETPLACE_EXTENSIONS = [
   }
 ];
 
-const ExtensionMarketplace = ({ onInstallExtension, installedExtensions }) => {
+const ExtensionMarketplace = ({ 
+  onInstallExtension, 
+  installedExtensions, 
+  marketplaceExtensions = [], 
+  loadingExtensions = false,
+  onSearchExtensions,
+  onUninstallExtension,
+  useOpenVSX = false,
+  onToggleMarketplace
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sortBy, setSortBy] = useState('downloads');
@@ -146,10 +155,13 @@ const ExtensionMarketplace = ({ onInstallExtension, installedExtensions }) => {
   const categories = ['All', 'Formatters', 'Linters', 'Git', 'Themes', 'IntelliSense', 'Other'];
   const sortOptions = ['downloads', 'rating', 'name'];
 
-  const filteredExtensions = MARKETPLACE_EXTENSIONS.filter(ext => {
+  // Use real marketplace extensions if available, otherwise fallback to mock data
+  const availableExtensions = marketplaceExtensions.length > 0 ? marketplaceExtensions : MARKETPLACE_EXTENSIONS;
+  
+  const filteredExtensions = availableExtensions.filter(ext => {
     const matchesSearch = ext.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          ext.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         ext.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+                         (ext.tags && ext.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())));
     
     const matchesCategory = selectedCategory === 'All' || ext.category === selectedCategory;
     
@@ -159,15 +171,33 @@ const ExtensionMarketplace = ({ onInstallExtension, installedExtensions }) => {
   const sortedExtensions = [...filteredExtensions].sort((a, b) => {
     switch (sortBy) {
       case 'downloads':
-        return b.downloads - a.downloads;
+        return (b.downloads || 0) - (a.downloads || 0);
       case 'rating':
-        return b.rating - a.rating;
+        return (b.rating || 0) - (a.rating || 0);
       case 'name':
         return a.name.localeCompare(b.name);
       default:
         return 0;
     }
   });
+
+  // Load marketplace extensions on component mount and when search changes
+  useEffect(() => {
+    if (onSearchExtensions && marketplaceExtensions.length === 0) {
+      onSearchExtensions(searchTerm, 50);
+    }
+  }, [onSearchExtensions, searchTerm, marketplaceExtensions.length]);
+
+  // Handle search with debounce
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (onSearchExtensions) {
+        onSearchExtensions(searchTerm, 50);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, onSearchExtensions]);
 
   const isExtensionInstalled = (extensionId) => {
     return installedExtensions.some(ext => ext.id === extensionId);
@@ -202,21 +232,41 @@ const ExtensionMarketplace = ({ onInstallExtension, installedExtensions }) => {
           <h2>Extension Marketplace</h2>
         </div>
         
-        <div className="marketplace-tabs">
-          <button 
-            className={`tab-button ${activeTab === 'marketplace' ? 'active' : ''}`}
-            onClick={() => setActiveTab('marketplace')}
-          >
-            <VscCloudDownload />
-            Marketplace ({MARKETPLACE_EXTENSIONS.length})
-          </button>
-          <button 
-            className={`tab-button ${activeTab === 'installed' ? 'active' : ''}`}
-            onClick={() => setActiveTab('installed')}
-          >
-            <VscCheck />
-            Installed ({installedExtensions.length})
-          </button>
+        <div className="marketplace-controls-header">
+          <div className="marketplace-tabs">
+            <button 
+              className={`tab-button ${activeTab === 'marketplace' ? 'active' : ''}`}
+              onClick={() => setActiveTab('marketplace')}
+            >
+              <VscCloudDownload />
+              Marketplace ({availableExtensions.length})
+            </button>
+            <button 
+              className={`tab-button ${activeTab === 'installed' ? 'active' : ''}`}
+              onClick={() => setActiveTab('installed')}
+            >
+              <VscCheck />
+              Installed ({installedExtensions.length})
+            </button>
+          </div>
+          
+          {onToggleMarketplace && (
+            <div className="marketplace-toggle">
+              <span>Source:</span>
+              <button 
+                className={`toggle-button ${!useOpenVSX ? 'active' : ''}`}
+                onClick={() => onToggleMarketplace()}
+              >
+                Microsoft
+              </button>
+              <button 
+                className={`toggle-button ${useOpenVSX ? 'active' : ''}`}
+                onClick={() => onToggleMarketplace()}
+              >
+                Open VSX
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -258,73 +308,80 @@ const ExtensionMarketplace = ({ onInstallExtension, installedExtensions }) => {
           </div>
 
           <div className="extensions-grid">
-            {sortedExtensions.map(extension => {
-          const isInstalled = isExtensionInstalled(extension.id);
-          
-          return (
-            <div key={extension.id} className="extension-card">
-              <div className="extension-header">
-                <div className="extension-icon-large">{getExtensionIcon(extension.icon, extension.category)}</div>
-                <div className="extension-info">
-                  <h3 className="extension-name">{extension.name}</h3>
-                  <p className="extension-author">by {extension.author}</p>
-                  <div className="extension-meta">
-                    <div className="extension-stats">
-                      <span className="extension-downloads">
-                        <VscCloudDownload size={12} />
-                        {formatDownloads(extension.downloads)}
-                      </span>
-                      <span className="extension-rating">
-                        <VscStarFull size={12} />
-                        {extension.rating}
-                      </span>
+            {loadingExtensions ? (
+              <div className="loading-extensions">
+                <div className="loading-spinner"></div>
+                <p>Loading extensions from {useOpenVSX ? 'Open VSX Registry' : 'Microsoft Marketplace'}...</p>
+              </div>
+            ) : (
+              sortedExtensions.map(extension => {
+                const isInstalled = isExtensionInstalled(extension.id);
+                
+                return (
+                  <div key={extension.id} className="extension-card">
+                    <div className="extension-header">
+                      <div className="extension-icon-large">{getExtensionIcon(extension.icon, extension.category)}</div>
+                      <div className="extension-info">
+                        <h3 className="extension-name">{extension.name}</h3>
+                        <p className="extension-author">by {extension.author}</p>
+                        <div className="extension-meta">
+                          <div className="extension-stats">
+                            <span className="extension-downloads">
+                              <VscCloudDownload size={12} />
+                              {formatDownloads(extension.downloads)}
+                            </span>
+                            <span className="extension-rating">
+                              <VscStarFull size={12} />
+                              {extension.rating}
+                            </span>
+                          </div>
+                          <div className="extension-tags">
+                            {extension.tags.slice(0, 3).map(tag => (
+                              <span key={tag} className="extension-tag">{tag}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="extension-tags">
-                      {extension.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="extension-tag">{tag}</span>
-                      ))}
+                    
+                    <p className="extension-description">{extension.description}</p>
+                    
+                    <div className="extension-footer">
+                      <div className="extension-compatibility">
+                        {extension.webCompatible ? (
+                          <span className="compatibility-badge compatible">
+                            <VscCheck size={12} />
+                            Web Compatible
+                          </span>
+                        ) : (
+                          <span className="compatibility-badge incompatible">
+                            <VscWarning size={12} />
+                            Requires Backend
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="extension-actions">
+                        {isInstalled ? (
+                          <button className="extension-btn installed" disabled>
+                            <VscCheck />
+                            Installed
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleInstallExtension(extension)}
+                            className="extension-btn install"
+                            disabled={!extension.webCompatible}
+                          >
+                            {extension.webCompatible ? 'Install' : 'View Details'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-              
-              <p className="extension-description">{extension.description}</p>
-              
-              <div className="extension-footer">
-                <div className="extension-compatibility">
-                  {extension.webCompatible ? (
-                    <span className="compatibility-badge compatible">
-                      <VscCheck size={12} />
-                      Web Compatible
-                    </span>
-                  ) : (
-                    <span className="compatibility-badge incompatible">
-                      <VscWarning size={12} />
-                      Requires Backend
-                    </span>
-                  )}
-                </div>
-                
-                <div className="extension-actions">
-                  {isInstalled ? (
-                    <button className="extension-btn installed" disabled>
-                      <VscCheck />
-                      Installed
-                    </button>
-                  ) : (
-                    <button 
-                      onClick={() => handleInstallExtension(extension)}
-                      className="extension-btn install"
-                      disabled={!extension.webCompatible}
-                    >
-                      {extension.webCompatible ? 'Install' : 'View Details'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                );
+              })
+            )}
           </div>
         </>
       )}

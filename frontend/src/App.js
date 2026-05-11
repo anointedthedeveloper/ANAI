@@ -411,6 +411,55 @@ function App() {
     return installedExtensions.some(ext => ext.id === extensionId);
   };
 
+  // Load extensions from marketplace
+  const loadMarketplaceExtensions = useCallback(async (query = "", pageSize = 20) => {
+    setLoadingExtensions(true);
+    try {
+      marketplaceService.setMarketplace(useOpenVSX);
+      const result = await marketplaceService.searchExtensions(query, pageSize);
+      setMarketplaceExtensions(result.extensions);
+    } catch (error) {
+      console.error('Error loading marketplace extensions:', error);
+      setMarketplaceExtensions([]);
+    } finally {
+      setLoadingExtensions(false);
+    }
+  }, [marketplaceService, useOpenVSX]);
+
+  // Install extension from marketplace
+  const installMarketplaceExtension = useCallback(async (extension) => {
+    try {
+      // Check if already installed
+      if (isExtensionInstalled(extension.id)) {
+        console.log('Extension already installed:', extension.id);
+        return;
+      }
+
+      // Add to installed extensions
+      setInstalledExtensions(prev => [...prev, extension]);
+      
+      // If it's a web-compatible extension, we could download and activate it here
+      if (extension.webCompatible && extension.downloadUrl) {
+        console.log('Installing web extension:', extension.id);
+        // TODO: Implement actual extension download and activation
+      }
+      
+      console.log('Extension installed:', extension.name);
+    } catch (error) {
+      console.error('Error installing extension:', error);
+    }
+  }, [isExtensionInstalled]);
+
+  // Uninstall extension
+  const uninstallExtension = useCallback(async (extensionId) => {
+    try {
+      setInstalledExtensions(prev => prev.filter(ext => ext.id !== extensionId));
+      console.log('Extension uninstalled:', extensionId);
+    } catch (error) {
+      console.error('Error uninstalling extension:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!event || !event.key) return; // Fix: Check if event and key exist
@@ -609,11 +658,14 @@ function App() {
               </div>
             ) : activeActivity === "extensions" ? (
               <ExtensionMarketplace 
-                onInstallExtension={(extension) => {
-                  setInstalledExtensions(prev => [...prev, extension]);
-                  console.log('Installed extension:', extension.name);
-                }}
+                onInstallExtension={installMarketplaceExtension}
                 installedExtensions={installedExtensions}
+                marketplaceExtensions={marketplaceExtensions}
+                loadingExtensions={loadingExtensions}
+                onSearchExtensions={loadMarketplaceExtensions}
+                onUninstallExtension={uninstallExtension}
+                useOpenVSX={useOpenVSX}
+                onToggleMarketplace={() => setUseOpenVSX(!useOpenVSX)}
               />
             ) : activeActivity === "vscode" ? (
               <VSCodeEmbed 
