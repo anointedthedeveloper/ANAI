@@ -19,7 +19,47 @@ import {
   VscSync,
   VscTerminal,
   VscCode,
-  VscPlay
+  VscPlay,
+  VscFileCode,
+  VscFilePdf,
+  VscFileZip,
+  VscFileMedia,
+  VscFileImage,
+  VscFileBinary,
+  VscJson,
+  VscGist,
+  VscGistSecret,
+  VscDatabase,
+  VscServer,
+  VscCloud,
+  VscGear,
+  VscSymbolColor,
+  VscSymbolMisc,
+  VscSymbolEvent,
+  VscSymbolInterface,
+  VscSymbolMethod,
+  VscSymbolNamespace,
+  VscSymbolNumber,
+  VscSymbolParameter,
+  VscSymbolString,
+  VscSymbolVariable,
+  VscSymbolSnippet,
+  VscSymbolKeyword,
+  VscSymbolRuler,
+  VscSymbolClass,
+  VscSymbolEnum,
+  VscSymbolProperty,
+  VscSymbolField,
+  VscSymbolConstructor,
+  VscSymbolFunction,
+  VscSymbolBoolean,
+  VscSymbolArray,
+  VscSymbolObject,
+  VscSymbolKey,
+  VscSymbolNull,
+  VscSymbolEnumMember,
+  VscSymbolOperator,
+  VscSymbolStruct
 } from "react-icons/vsc";
 import AiChat from "./AiChat";
 import EnhancedCodeEditor from "./EnhancedCodeEditor";
@@ -62,6 +102,13 @@ function App() {
   const [marketplaceExtensions, setMarketplaceExtensions] = useState([]);
   const [loadingExtensions, setLoadingExtensions] = useState(false);
   const [useOpenVSX, setUseOpenVSX] = useState(false);
+  
+  // VSCode-style dialog states
+  const [showFileDialog, setShowFileDialog] = useState(false);
+  const [dialogMode, setDialogMode] = useState('file'); // 'file' or 'folder'
+  const [dialogTitle, setDialogTitle] = useState('');
+  const [dialogInput, setDialogInput] = useState('');
+  const [dialogError, setDialogError] = useState('');
   const terminalRef = useRef(null);
   const terminalInputRef = useRef(null);
   const editorRef = useRef(null);
@@ -100,6 +147,97 @@ function App() {
       dockerfile: "dockerfile"
     };
     return languageMap[extension] || "plaintext";
+  };
+
+  const getFileIcon = (fileName, isFolder = false) => {
+    if (isFolder) {
+      return <VscFolderOpened />;
+    }
+
+    const extension = fileName.split(".").pop().toLowerCase();
+    
+    const iconMap = {
+      // Web files
+      html: <VscFileCode />,
+      htm: <VscFileCode />,
+      css: <VscFileCode />,
+      scss: <VscFileCode />,
+      sass: <VscFileCode />,
+      less: <VscFileCode />,
+      
+      // JavaScript/TypeScript
+      js: <VscFileCode />,
+      jsx: <VscFileCode />,
+      ts: <VscFileCode />,
+      tsx: <VscFileCode />,
+      mjs: <VscFileCode />,
+      cjs: <VscFileCode />,
+      
+      // Configuration files
+      json: <VscJson />,
+      jsonc: <VscJson />,
+      json5: <VscJson />,
+      xml: <VscFileCode />,
+      yaml: <VscFileCode />,
+      yml: <VscFileCode />,
+      toml: <VscFileCode />,
+      ini: <VscFileCode />,
+      env: <VscGear />,
+      
+      // Documentation
+      md: <VscFileCode />,
+      markdown: <VscFileCode />,
+      txt: <VscFile />,
+      rtf: <VscFile />,
+      
+      // Images
+      png: <VscFileImage />,
+      jpg: <VscFileImage />,
+      jpeg: <VscFileImage />,
+      gif: <VscFileImage />,
+      svg: <VscFileImage />,
+      ico: <VscFileImage />,
+      bmp: <VscFileImage />,
+      webp: <VscFileImage />,
+      
+      // Media
+      mp4: <VscFileMedia />,
+      avi: <VscFileMedia />,
+      mov: <VscFileMedia />,
+      mp3: <VscFileMedia />,
+      wav: <VscFileMedia />,
+      ogg: <VscFileMedia />,
+      
+      // Archives
+      zip: <VscFileZip />,
+      rar: <VscFileZip />,
+      tar: <VscFileZip />,
+      gz: <VscFileZip />,
+      '7z': <VscFileZip />,
+      
+      // PDF
+      pdf: <VscFilePdf />,
+      
+      // Database
+      sql: <VscDatabase />,
+      db: <VscDatabase />,
+      sqlite: <VscDatabase />,
+      
+      // Build/Packaging
+      dockerfile: <VscServer />,
+      docker: <VscServer />,
+      makefile: <VscGear />,
+      cmake: <VscGear />,
+      
+      // Version Control
+      gitignore: <VscGist />,
+      gitattributes: <VscGist />,
+      
+      // Default for unknown types
+      default: <VscFile />
+    };
+    
+    return iconMap[extension] || iconMap.default;
   };
 
   useEffect(() => {
@@ -276,43 +414,88 @@ function App() {
       await openFolder();
       return;
     }
+    
+    showCreateFileDialog();
+  }, [openFolder, selectedRepo, showCreateFileDialog]);
 
-    const name = window.prompt("New file name:");
-    if (!name?.trim()) return;
+  // VSCode-style dialog functions
+  const showCreateFileDialog = useCallback(() => {
+    setDialogMode('file');
+    setDialogTitle('New File');
+    setDialogInput('');
+    setDialogError('');
+    setShowFileDialog(true);
+  }, []);
+
+  const showCreateFolderDialog = useCallback(() => {
+    setDialogMode('folder');
+    setDialogTitle('New Folder');
+    setDialogInput('');
+    setDialogError('');
+    setShowFileDialog(true);
+  }, []);
+
+  const handleDialogSubmit = useCallback(async () => {
+    if (!dialogInput.trim()) {
+      setDialogError('Name cannot be empty');
+      return;
+    }
+
+    // Validate file/folder name
+    const invalidChars = /[<>:"/\\|?*]/;
+    if (invalidChars.test(dialogInput)) {
+      setDialogError('Name contains invalid characters');
+      return;
+    }
 
     try {
-      const res = await axios.post("http://localhost:3001/workspace/create-file", {
-        workspacePath: selectedRepo.path,
-        currentPath: currentPath || selectedRepo.path,
-        name: name.trim()
-      });
-      await loadFiles(currentPath || selectedRepo.path);
-      await loadFileContent(res.data.path);
+      if (dialogMode === 'file') {
+        const res = await axios.post("http://localhost:3001/workspace/create-file", {
+          workspacePath: selectedRepo.path,
+          currentPath: currentPath || selectedRepo.path,
+          name: dialogInput.trim()
+        });
+        await loadFiles(currentPath || selectedRepo.path);
+        await loadFileContent(res.data.path);
+      } else {
+        await axios.post("http://localhost:3001/workspace/create-folder", {
+          workspacePath: selectedRepo.path,
+          currentPath: currentPath || selectedRepo.path,
+          name: dialogInput.trim()
+        });
+        await loadFiles(currentPath || selectedRepo.path);
+      }
+      
+      setShowFileDialog(false);
+      setDialogInput('');
+      setDialogError('');
     } catch (error) {
-      window.alert(error.response?.data?.error || error.message);
+      setDialogError(error.response?.data?.error || error.message);
     }
-  }, [currentPath, loadFileContent, loadFiles, openFolder, selectedRepo]);
+  }, [dialogInput, dialogMode, currentPath, loadFileContent, loadFiles, selectedRepo]);
+
+  const handleDialogCancel = useCallback(() => {
+    setShowFileDialog(false);
+    setDialogInput('');
+    setDialogError('');
+  }, []);
+
+  const handleDialogKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      handleDialogSubmit();
+    } else if (e.key === 'Escape') {
+      handleDialogCancel();
+    }
+  }, [handleDialogSubmit, handleDialogCancel]);
 
   const createFolder = useCallback(async () => {
     if (!selectedRepo?.path) {
       await openFolder();
       return;
     }
-
-    const name = window.prompt("New folder name:");
-    if (!name?.trim()) return;
-
-    try {
-      await axios.post("http://localhost:3001/workspace/create-folder", {
-        workspacePath: selectedRepo.path,
-        currentPath: currentPath || selectedRepo.path,
-        name: name.trim()
-      });
-      await loadFiles(currentPath || selectedRepo.path);
-    } catch (error) {
-      window.alert(error.response?.data?.error || error.message);
-    }
-  }, [currentPath, loadFiles, openFolder, selectedRepo]);
+    
+    showCreateFolderDialog();
+  }, [openFolder, selectedRepo, showCreateFolderDialog]);
 
   const saveFile = useCallback(async () => {
     if (!activeFile) return;
@@ -507,7 +690,7 @@ function App() {
             }
           }}
         >
-          <span className="file-icon">{file.type === "folder" ? <VscFolderOpened /> : <VscFile />}</span>
+          <span className="file-icon">{getFileIcon(file.name, file.type === "folder")}</span>
           <span className="file-name">{file.name}</span>
           {file.children && renderFileTree(file.children, depth + 1)}
         </div>
@@ -830,6 +1013,48 @@ function App() {
           <span>Backend: 3001</span>
         </div>
       </footer>
+
+      {/* VSCode-style File/Folder Creation Dialog */}
+      {showFileDialog && (
+        <div className="vscode-dialog-overlay" onClick={handleDialogCancel}>
+          <div className="vscode-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="vscode-dialog-header">
+              <h3>{dialogTitle}</h3>
+              <button className="vscode-dialog-close" onClick={handleDialogCancel}>
+                <VscChromeClose />
+              </button>
+            </div>
+            <div className="vscode-dialog-body">
+              <input
+                type="text"
+                className={`vscode-input ${dialogError ? 'error' : ''}`}
+                value={dialogInput}
+                onChange={(e) => setDialogInput(e.target.value)}
+                onKeyDown={handleDialogKeyDown}
+                placeholder={dialogMode === 'file' ? 'Enter file name...' : 'Enter folder name...'}
+                autoFocus
+              />
+              {dialogError && (
+                <div className="vscode-error-message">
+                  {dialogError}
+                </div>
+              )}
+            </div>
+            <div className="vscode-dialog-footer">
+              <button className="vscode-button secondary" onClick={handleDialogCancel}>
+                Cancel
+              </button>
+              <button 
+                className="vscode-button primary" 
+                onClick={handleDialogSubmit}
+                disabled={!dialogInput.trim()}
+              >
+                {dialogMode === 'file' ? 'Create File' : 'Create Folder'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
