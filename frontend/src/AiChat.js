@@ -565,10 +565,6 @@ function AiChat({
           ))}
           {isThinking && thinkingText && (
             <div className="thinking-container">
-              <div className="thinking-header">
-                <VscCircleFilled className="thinking-icon" />
-                <span>Thinking...</span>
-              </div>
               <div className="thinking-content">
                 {renderMessageContent(thinkingText)}
               </div>
